@@ -97,8 +97,8 @@ Per tenant, the dashboard talks to **five read endpoints** through
 | Endpoint | Used for |
 |---|---|
 | `GET /v1/calls`, `GET /v1/calls/{id}` | Calls list, call detail drawer (cost recomputed per tenant — see Billing model) |
-| `GET /v1/calls/{id}/transcript` | Transcript tab |
-| `GET /v1/calls/{id}/recording` | Recording tab — 15-minute signed audio URL |
+| `GET /v1/calls/{id}/transcript` | Transcript, shown in the call detail drawer |
+| `GET /v1/calls/{id}/recording` | Inline "Play recording" button below the call's cost — fetched live on click, 15-minute signed URL |
 | `GET /v1/balance` | Wallet balance + service credits (Overview, Billing) |
 | `GET /v1/voices` | Available but not currently surfaced in the UI |
 
@@ -116,7 +116,7 @@ that look like a booking action (`book_appointment`, `reschedule_appointment`,
 appointment rows from their arguments/results — already agent-scoped, since it
 runs through the same tenant-scoped client as everything else. This scan
 happens server-side only; the Calls tab's detail drawer shows transcript and
-recording, not raw tool calls.
+an inline recording player, not raw tool calls.
 
 ## Architecture
 
@@ -137,10 +137,10 @@ server/
   index.js             Express app: auth routes, admin routes, tenant-scoped data routes
 
 src/
-  lib/                Types, typed fetch hook, auth contexts (client + admin), formatters
+  lib/                Types, typed fetch hook, session context (one login, both roles), formatters
   components/         Shell (nav/topbar/tenant badge), reusable UI, chart primitives
-  pages/              Overview · Calls · Appointments · Billing · Settings
-  pages/admin/        Admin login + client management console
+  pages/              Login · Overview · Calls · Appointments · Billing · Settings
+  pages/admin/        Client management console (admin-only, same /login screen)
 ```
 
 No Sonex API key or Supabase key ever reaches the browser — the client only

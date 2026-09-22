@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --surface-page: #f5f8fd;
+  --surface-1: #ffffff;
+  --surface-2: #f2f7fe;
+
+  /* Ink */
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #84837d;
+
+  /* Categorical slots, in fixed order. Validated on a #ffffff surface:
+     lightness band, chroma floor, CVD separation and normal-vision floor all
+     pass. Slots 3 and 4 fall below 3:1 contrast, so every chart using them
+     ships direct labels plus a table view (the relief rule). */
+  --series-1: #2a78d6; /* blue     - LLM */
+  --series-2: #eb6834; /* orange   - STT */
+  --series-3: #1baf7a; /* aqua     - TTS */
+  --series-4: #eda100; /* yellow   - Telephony */
+
+  /* Status - reserved, never reused as a series colour. Always paired with an
+     icon or a text label so meaning never rides on hue alone. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Chart furniture stays recessive. */
+  --grid: #e6ecf5;
+  --axis: #b9c6da;
+}
+
+* {
+  border-color: theme('colors.line');
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-page);
+  color: var(--text-primary);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'cv02', 'cv03', 'cv04';
+}
+
+/* Numbers in tables and KPIs line up column-wise. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d6e1f0;
+  border: 3px solid var(--surface-page);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b9c6da;
+}
+
+/* Every interactive surface shares one focus treatment. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-white shadow-card;
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lift;
+  }
+
+  .field {
+    @apply h-9 rounded-lg border border-line bg-white px-3 text-sm text-ink
+           transition-colors duration-200
+           hover:border-brand-200 focus:border-brand-400 focus:outline-none;
+  }
+
+  .btn {
+    @apply inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-sm font-medium
+           transition-all duration-200 active:scale-[0.98] disabled:opacity-50
+           disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 text-white shadow-sm hover:bg-brand-600;
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-white text-ink-muted hover:border-brand-200 hover:text-brand-600;
+  }
+
+  .skeleton {
+    @apply rounded-lg bg-[linear-gradient(90deg,#eef3fa_25%,#f8fbff_50%,#eef3fa_75%)]
+           bg-[length:200%_100%] animate-shimmer;
+  }
+}
+
+/* Recharts leaves a focus ring on the plot wrapper; the tooltip carries the
+   information, so suppress it. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
