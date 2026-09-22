@@ -29,6 +29,12 @@ function persist() {
 
 let tenants = load();
 
+// Backfill updatedAt on records written before this field existed, so old
+// entries show a real timestamp (their created date) instead of blank.
+for (const t of tenants) {
+  if (!t.updatedAt) t.updatedAt = t.createdAt;
+}
+
 // No hardcoded demo credential is ever shipped in source. If you want a demo
 // client seeded on first run, set DEMO_SEED_USERNAME/DEMO_SEED_PASSWORD in
 // .env; otherwise the store starts empty and the first client comes from the
@@ -95,6 +101,7 @@ export async function createTenant(input) {
     providerCostInrPerMin: Number(input.providerCostInrPerMin) || 2.5,
     pulseSeconds: Number(input.pulseSeconds) || 30,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   tenants.push(tenant);
   persist();
@@ -117,6 +124,7 @@ export async function updateTenant(id, patch) {
   if (patch.clientRateInrPerMin !== undefined) t.clientRateInrPerMin = Number(patch.clientRateInrPerMin);
   if (patch.providerCostInrPerMin !== undefined) t.providerCostInrPerMin = Number(patch.providerCostInrPerMin);
   if (patch.pulseSeconds !== undefined) t.pulseSeconds = Number(patch.pulseSeconds);
+  t.updatedAt = new Date().toISOString();
   persist();
   return toPublic(t);
 }

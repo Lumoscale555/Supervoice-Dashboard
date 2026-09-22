@@ -160,6 +160,7 @@ export interface TenantPublic {
   providerCostInrPerMin: number;
   pulseSeconds: number;
   createdAt: string;
+  updatedAt: string;
   hasApiKey: boolean;
   apiKeyPreview: string | null;
 }

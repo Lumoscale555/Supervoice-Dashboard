@@ -1,5 +1,9 @@
 -- Run this once against your Supabase project (SQL Editor -> New query)
 -- before setting SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env.
+--
+-- Safe to re-run: every statement is idempotent, so running this again
+-- against a table that already exists (e.g. to pick up updated_at below)
+-- only adds what's missing, it never drops or overwrites data.
 
 create extension if not exists pgcrypto;
 
@@ -14,10 +18,31 @@ create table if not exists tenants (
   client_rate_inr_per_min     numeric not null default 5,
   provider_cost_inr_per_min   numeric not null default 2.5,
   pulse_seconds               integer not null default 30,
-  created_at                  timestamptz not null default now()
+  created_at                  timestamptz not null default now(),
+  updated_at                  timestamptz not null default now()
 );
 
+-- If this table was created before updated_at existed, this adds it without
+-- touching anything else.
+alter table tenants add column if not exists updated_at timestamptz not null default now();
+
 create unique index if not exists tenants_username_lower_idx on tenants (lower(username));
+
+-- Keep updated_at current automatically on every UPDATE — including edits
+-- made directly in the SQL editor, not just through the admin console.
+create or replace function set_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists tenants_set_updated_at on tenants;
+create trigger tenants_set_updated_at
+  before update on tenants
+  for each row
+  execute function set_updated_at();
 
 -- The server talks to this table with the service-role key only (never the
 -- browser), so Row Level Security can stay off — access control lives in the

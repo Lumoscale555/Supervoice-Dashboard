@@ -36,6 +36,7 @@ function fromRow(row) {
     providerCostInrPerMin: Number(row.provider_cost_inr_per_min),
     pulseSeconds: Number(row.pulse_seconds),
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 

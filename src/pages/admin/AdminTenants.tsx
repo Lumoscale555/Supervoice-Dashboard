@@ -454,7 +454,9 @@ function TenantBillingDrawer({ tenant, onClose }: { tenant: TenantPublic; onClos
                 </div>
               </div>
 
-              <p className="mt-4 text-[11px] text-ink-faint">Client since {dateOnly(tenant.createdAt)} · mode: {data.mode}</p>
+              <p className="mt-4 text-[11px] text-ink-faint">
+                Client since {dateOnly(tenant.createdAt)} · last updated {dateTime(tenant.updatedAt)} · mode: {data.mode}
+              </p>
 
               <div className="mt-6">
                 <h4 className="mb-3 text-sm font-semibold text-ink">Every call — phone, duration, fixed cost, provider cost &amp; profit</h4>
