@@ -1,4 +1,6 @@
-// Two independent login surfaces on one session cookie:
+// Two independent login surfaces on one signed session cookie (see
+// server/authSession.js — a stateless JWT, not server-side memory, so this
+// works identically on serverless):
 //   role: 'client' + tenantId  -> the dashboard, scoped to that tenant
 //   role: 'admin'              -> the tenant-management console
 // A client session can never reach admin routes and vice versa.
@@ -6,12 +8,12 @@
 import { verifyPassword } from './crypto.js';
 
 export function requireClient(req, res, next) {
-  if (req.session?.role === 'client' && req.session.tenantId) return next();
+  if (req.authSession?.role === 'client' && req.authSession.tenantId) return next();
   res.status(401).json({ error: { message: 'Sign in to continue.', status: 401 } });
 }
 
 export function requireAdmin(req, res, next) {
-  if (req.session?.role === 'admin') return next();
+  if (req.authSession?.role === 'admin') return next();
   res.status(401).json({ error: { message: 'Admin sign-in required.', status: 401 } });
 }
 

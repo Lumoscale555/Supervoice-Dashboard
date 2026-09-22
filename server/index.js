@@ -10,10 +10,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
-import crypto from 'node:crypto';
 
 import express from 'express';
-import session from 'express-session';
+import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import cors from 'cors';
 import 'dotenv/config';
@@ -23,6 +22,7 @@ import { priceCall, priceCallWithMargin } from './pricing.js';
 import { buildBillingSummary } from './billing.js';
 import { getScopedClient, tenantMode, clearTenantClientCache } from './tenantClient.js';
 import { requireClient, requireAdmin, checkAdminCredentials, verifyPassword } from './auth.js';
+import { readSession, setSessionCookie, clearSessionCookie } from './authSession.js';
 import * as store from './store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,30 +31,13 @@ const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.env.PORT) || 8787;
 const TIMEZONE = process.env.TIMEZONE || 'UTC';
 
-// No hardcoded fallback secret: if SESSION_SECRET isn't set in .env, generate
-// a random one for this process instead of shipping a fixed, guessable
-// default. The only cost is that existing sessions won't survive a restart
-// until a real value is set — a fine trade for never having a known secret
-// baked into the source.
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-if (!process.env.SESSION_SECRET) {
-  console.warn('  ⚠ SESSION_SECRET not set in .env — using a random value for this run (sessions reset on restart).');
-}
-
 const app = express();
 app.set('trust proxy', 1);
 app.use(compression());
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
-app.use(
-  session({
-    name: 'sv.sid',
-    secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 },
-  }),
-);
+app.use(cookieParser());
+app.use(readSession);
 
 const route = (handler) => async (req, res) => {
   try {
@@ -80,9 +63,9 @@ function resolveRange(query) {
 /** Loads the tenant behind the session onto req.tenant + a scoped client. */
 async function loadTenant(req, res, next) {
   try {
-    const tenant = await store.getTenantRaw(req.session.tenantId);
+    const tenant = await store.getTenantRaw(req.authSession.tenantId);
     if (!tenant) {
-      req.session.destroy(() => {});
+      clearSessionCookie(res);
       return res.status(401).json({ error: { message: 'Session expired. Sign in again.', status: 401 } });
     }
     req.tenant = tenant;
@@ -102,41 +85,43 @@ app.get('/api/health', (_req, res) => {
 // back to the tenant store. Whichever matches sets the session role, and the
 // frontend routes to /admin or / based on what comes back — there is only
 // ever one login screen, not two.
-app.post(
-  '/api/auth/login',
-  route(async (req) => {
+app.post('/api/auth/login', async (req, res) => {
+  try {
     const { username, password } = req.body || {};
     if (!username || !password) {
       throw Object.assign(new Error('Enter a username and password.'), { status: 400 });
     }
 
     if (checkAdminCredentials(username, password)) {
-      req.session.role = 'admin';
-      return { ok: true, role: 'admin' };
+      setSessionCookie(res, { role: 'admin' });
+      return res.json({ ok: true, role: 'admin' });
     }
 
     const tenant = await store.getTenantByUsername(username);
     if (tenant && verifyPassword(password, tenant.passwordHash)) {
-      req.session.role = 'client';
-      req.session.tenantId = tenant.id;
-      return { ok: true, role: 'client', tenant: await store.getTenantPublic(tenant.id) };
+      setSessionCookie(res, { role: 'client', tenantId: tenant.id });
+      return res.json({ ok: true, role: 'client', tenant: await store.getTenantPublic(tenant.id) });
     }
 
     throw Object.assign(new Error('Incorrect username or password.'), { status: 401 });
-  }),
-);
+  } catch (err) {
+    const status = err.status || 502;
+    res.status(status).json({ error: { message: err.message, status } });
+  }
+});
 
 app.post('/api/auth/logout', (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
+  clearSessionCookie(res);
+  res.json({ ok: true });
 });
 
 /** Single "who am I" check the frontend uses to decide which app to render. */
 app.get(
   '/api/session',
   route(async (req) => {
-    if (req.session?.role === 'admin') return { role: 'admin' };
-    if (req.session?.role === 'client' && req.session.tenantId) {
-      const tenant = await store.getTenantRaw(req.session.tenantId);
+    if (req.authSession?.role === 'admin') return { role: 'admin' };
+    if (req.authSession?.role === 'client' && req.authSession.tenantId) {
+      const tenant = await store.getTenantRaw(req.authSession.tenantId);
       if (tenant) {
         return {
           role: 'client',
@@ -397,19 +382,27 @@ if (fs.existsSync(dist)) {
   });
 }
 
-app.listen(PORT, async () => {
-  console.log(`\n  Super Voice API  ->  http://localhost:${PORT}`);
-  console.log(`  Tenant store: ${store.backend === 'supabase' ? 'Supabase' : 'local file (server/data/tenants.json)'}`);
-  if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
-    console.log(`  Admin login: ${process.env.ADMIN_USERNAME} / (from .env)`);
-  } else {
-    console.warn('  ⚠ ADMIN_USERNAME / ADMIN_PASSWORD not set in .env — admin console login is disabled until they are.');
-  }
-  try {
-    const tenants = await store.listTenants();
-    console.log(`  ${tenants.length} client${tenants.length === 1 ? '' : 's'} configured\n`);
-  } catch (err) {
-    console.error(`  Could not reach the tenant store: ${err.message}`);
-    console.error(`  Check SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env and that server/supabase.sql has been run.\n`);
-  }
-});
+// Vercel imports this module as a serverless function (see api/index.js) and
+// invokes the exported app directly per-request — it never calls listen().
+// Only start a real listening server when run directly (`node server/index.js`
+// / `npm start`, for self-hosting or local dev).
+if (!process.env.VERCEL) {
+  app.listen(PORT, async () => {
+    console.log(`\n  Super Voice API  ->  http://localhost:${PORT}`);
+    console.log(`  Tenant store: ${store.backend === 'supabase' ? 'Supabase' : 'local file (server/data/tenants.json)'}`);
+    if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
+      console.log(`  Admin login: ${process.env.ADMIN_USERNAME} / (from .env)`);
+    } else {
+      console.warn('  ⚠ ADMIN_USERNAME / ADMIN_PASSWORD not set in .env — admin console login is disabled until they are.');
+    }
+    try {
+      const tenants = await store.listTenants();
+      console.log(`  ${tenants.length} client${tenants.length === 1 ? '' : 's'} configured\n`);
+    } catch (err) {
+      console.error(`  Could not reach the tenant store: ${err.message}`);
+      console.error(`  Check SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env and that server/supabase.sql has been run.\n`);
+    }
+  });
+}
+
+export default app;
