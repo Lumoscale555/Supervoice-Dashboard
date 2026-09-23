@@ -52,7 +52,6 @@ export function Shell({ children }: { children: ReactNode }) {
             <p className="truncate text-sm font-medium text-ink">{me.tenant.name}</p>
             <p className="truncate text-xs text-ink-faint">
               {me.tenant.agentName ?? 'Whole account'}
-              {me.tenant.agentId && <span className="ml-1 font-mono text-[10px] text-ink-faint">({me.tenant.agentId})</span>}
             </p>
           </div>
         )}

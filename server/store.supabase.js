@@ -30,7 +30,10 @@ function fromRow(row) {
     username: row.username,
     passwordHash: row.password_hash,
     sonexApiKey: row.sonex_api_key || '',
-    agentId: row.agent_id,
+    // agent_id exists in the DB but is deliberately unused: Sonex's own
+    // dashboard only shows agents by name, never an ID, so tenant isolation
+    // is by agentName (see server/tenantClient.js). The column is left in
+    // place rather than dropped to avoid a destructive migration.
     agentName: row.agent_name,
     clientRateInrPerMin: Number(row.client_rate_inr_per_min),
     providerCostInrPerMin: Number(row.provider_cost_inr_per_min),
@@ -92,7 +95,6 @@ export async function createTenant(input) {
       username: input.username,
       password_hash: hashPassword(input.password),
       sonex_api_key: (input.sonexApiKey || '').trim(),
-      agent_id: input.agentId || null,
       agent_name: input.agentName || null,
       client_rate_inr_per_min: Number(input.clientRateInrPerMin) || 5,
       provider_cost_inr_per_min: Number(input.providerCostInrPerMin) || 2.5,
@@ -119,7 +121,6 @@ export async function updateTenant(id, patch) {
   if (patch.username !== undefined) update.username = patch.username;
   if (patch.password) update.password_hash = hashPassword(patch.password);
   if (patch.sonexApiKey !== undefined) update.sonex_api_key = String(patch.sonexApiKey).trim();
-  if (patch.agentId !== undefined) update.agent_id = patch.agentId || null;
   if (patch.agentName !== undefined) update.agent_name = patch.agentName || null;
   if (patch.clientRateInrPerMin !== undefined) update.client_rate_inr_per_min = Number(patch.clientRateInrPerMin);
   if (patch.providerCostInrPerMin !== undefined) update.provider_cost_inr_per_min = Number(patch.providerCostInrPerMin);

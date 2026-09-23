@@ -154,7 +154,6 @@ export interface TenantPublic {
   id: string;
   name: string;
   username: string;
-  agentId: string | null;
   agentName: string | null;
   clientRateInrPerMin: number;
   providerCostInrPerMin: number;

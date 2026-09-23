@@ -46,7 +46,6 @@ if (tenants.length === 0 && process.env.DEMO_SEED_USERNAME && process.env.DEMO_S
     username: process.env.DEMO_SEED_USERNAME,
     passwordHash: hashPassword(process.env.DEMO_SEED_PASSWORD),
     sonexApiKey: '',
-    agentId: null,
     agentName: 'Demo Agent',
     clientRateInrPerMin: 5,
     providerCostInrPerMin: 2.5,
@@ -95,7 +94,6 @@ export async function createTenant(input) {
     username: input.username,
     passwordHash: hashPassword(input.password),
     sonexApiKey: (input.sonexApiKey || '').trim(),
-    agentId: input.agentId || null,
     agentName: input.agentName || null,
     clientRateInrPerMin: Number(input.clientRateInrPerMin) || 5,
     providerCostInrPerMin: Number(input.providerCostInrPerMin) || 2.5,
@@ -119,7 +117,6 @@ export async function updateTenant(id, patch) {
   }
   if (patch.password) t.passwordHash = hashPassword(patch.password);
   if (patch.sonexApiKey !== undefined) t.sonexApiKey = String(patch.sonexApiKey).trim();
-  if (patch.agentId !== undefined) t.agentId = patch.agentId || null;
   if (patch.agentName !== undefined) t.agentName = patch.agentName || null;
   if (patch.clientRateInrPerMin !== undefined) t.clientRateInrPerMin = Number(patch.clientRateInrPerMin);
   if (patch.providerCostInrPerMin !== undefined) t.providerCostInrPerMin = Number(patch.providerCostInrPerMin);

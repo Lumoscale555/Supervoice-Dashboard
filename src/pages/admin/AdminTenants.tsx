@@ -109,13 +109,7 @@ export default function AdminTenants() {
                         </div>
                       </Td>
                       <Td className="text-ink-muted">
-                        {t.agentId ? (
-                          <>
-                            {t.agentName ?? 'Agent'} <span className="font-mono text-[11px] text-ink-faint">{t.agentId}</span>
-                          </>
-                        ) : (
-                          <span className="text-ink-faint">whole account</span>
-                        )}
+                        {t.agentName ? t.agentName : <span className="text-ink-faint">whole account</span>}
                       </Td>
                       <Td>
                         <span
@@ -186,7 +180,6 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
   // If a key is already saved, start masked with a "Change" affordance rather
   // than an editable input — avoids accidentally clobbering it on save.
   const [editingKey, setEditingKey] = useState(!tenant?.hasApiKey);
-  const [agentId, setAgentId] = useState(tenant?.agentId ?? '');
   const [agentName, setAgentName] = useState(tenant?.agentName ?? '');
   const [rate, setRate] = useState(String(tenant?.clientRateInrPerMin ?? 5));
   const [cost, setCost] = useState(String(tenant?.providerCostInrPerMin ?? 2.5));
@@ -206,7 +199,6 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
       const payload: Record<string, unknown> = {
         name,
         username,
-        agentId: agentId || null,
         agentName: agentName || null,
         clientRateInrPerMin: rateNum,
         providerCostInrPerMin: costNum,
@@ -246,8 +238,15 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
       <button aria-label="Close" className="absolute inset-0 bg-brand-950/30 backdrop-blur-sm animate-fade-in" onClick={onClose} />
       <aside className="relative flex h-full w-full max-w-lg animate-slide-in flex-col overflow-y-auto bg-white shadow-pop">
         <header className="flex items-center justify-between border-b border-line px-6 py-4">
-          <h3 className="text-base font-semibold text-ink">{isNew ? 'Add client' : `Edit ${tenant!.name}`}</h3>
-          <button className="btn-ghost !h-8 !w-8 !px-0" onClick={onClose} aria-label="Close">
+          <div>
+            <h3 className="text-base font-semibold text-ink">{isNew ? 'Add client' : `Edit ${tenant!.name}`}</h3>
+            {!isNew && tenant && (
+              <p className="mt-0.5 text-[11px] text-ink-faint">
+                Added {dateOnly(tenant.createdAt)} · last updated {dateTime(tenant.updatedAt)}
+              </p>
+            )}
+          </div>
+          <button className="btn-ghost !h-8 !w-8 !px-0 shrink-0" onClick={onClose} aria-label="Close">
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
               <path d="M2 2l10 10M12 2 2 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
             </svg>
@@ -325,24 +324,21 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
               </p>
             </Field>
 
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <Field label="Agent ID">
+            <div className="mt-3">
+              <Field label="Agent name">
                 <input
-                  className="field w-full font-mono text-xs"
-                  placeholder="agent_..."
-                  value={agentId}
-                  onChange={(e) => setAgentId(e.target.value)}
+                  className="field w-full"
+                  placeholder="Exactly as it appears in Sonex's Agents list"
+                  value={agentName}
+                  onChange={(e) => setAgentName(e.target.value)}
                   autoComplete="off"
                 />
               </Field>
-              <Field label="Agent name (display only)">
-                <input className="field w-full" value={agentName} onChange={(e) => setAgentName(e.target.value)} />
-              </Field>
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-              Sonex has no client/tenant concept — <code className="font-mono">agent.id</code> is what filters{' '}
-              <code className="font-mono">GET /v1/calls</code> to just this client's calls. Leave Agent ID blank only if this client has
-              their own dedicated Sonex API key.
+              Sonex has no client/tenant concept and its dashboard shows no agent ID — only a name. We match{' '}
+              <code className="font-mono">agent.name</code> case-insensitively to filter <code className="font-mono">GET /v1/calls</code>{' '}
+              to just this client's calls. Leave blank only if this client has their own dedicated Sonex API key.
             </p>
           </div>
 

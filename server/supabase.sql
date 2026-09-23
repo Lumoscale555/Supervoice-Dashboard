@@ -13,7 +13,7 @@ create table if not exists tenants (
   username                    text not null unique,
   password_hash               text not null,   -- salt:scrypt-hash, never plaintext
   sonex_api_key               text not null default '',
-  agent_id                    text,             -- Sonex agent.id that scopes this client's data
+  agent_id                    text,             -- unused (Sonex's dashboard shows no agent ID, only a name); kept for compatibility, never read/written by the app
   agent_name                  text,             -- display label only, not used for filtering
   client_rate_inr_per_min     numeric not null default 5,
   provider_cost_inr_per_min   numeric not null default 2.5,

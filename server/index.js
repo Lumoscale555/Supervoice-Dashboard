@@ -1,10 +1,10 @@
 // API for the Super Voice multi-tenant dashboard.
 //
 // Two logins share one session cookie: a super admin who creates/edits
-// tenants (client name, Sonex API key, agent_id scope, billing rates), and a
+// tenants (client name, Sonex API key, agent name scope, billing rates), and a
 // tenant ("client") login that only ever sees that tenant's own data. Every
 // data route below runs behind requireClient and reaches Sonex only through
-// getScopedClient(req.tenant), which forces agent_id isolation and never lets
+// getScopedClient(req.tenant), which filters by agent name and never lets
 // one tenant read another tenant's calls.
 
 import path from 'node:path';
