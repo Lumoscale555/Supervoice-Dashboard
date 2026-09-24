@@ -319,18 +319,31 @@ app.get(
   requireClient,
   loadTenant,
   route(async (req) => {
-    // Always attempt to fetch the recording regardless of has_recording flag,
-    // since the flag can be stale on cached responses or missing for some providers.
+    const callId = req.params.id;
+    let rec;
     try {
-      const rec = await req.client.getRecording(req.params.id);
-      return rec;
+      rec = await req.client.getRecording(callId);
     } catch (err) {
-      // Surface a clean message so the frontend can show it properly.
+      console.error(`[recording] Sonex error for ${callId}:`, err.status, err.message, err.body);
       throw Object.assign(
         new Error(err.message || 'No recording available for this call.'),
         { status: err.status || 404 },
       );
     }
+
+    // Log the raw response so we can see what Sonex actually returns.
+    console.log(`[recording] raw response for ${callId}:`, JSON.stringify(rec));
+
+    // Sonex returns url=null when the recording hasn't been processed yet.
+    // Surface this as a 404 so the frontend shows a useful error.
+    if (!rec || !rec.url) {
+      throw Object.assign(
+        new Error('Recording is not ready yet — Sonex may still be processing it. Try again in a few seconds.'),
+        { status: 404 },
+      );
+    }
+
+    return rec;
   }),
 );
 

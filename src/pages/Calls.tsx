@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, useQuery, useStreamQuery } from '../lib/api';
 import type { CallDetail, CallRecording, CallSummary } from '../lib/types';
@@ -306,67 +306,268 @@ function TranscriptView({ call }: { call: CallDetail }) {
 }
 
 /**
- * A play button that fetches the signed recording URL live (on demand,
- * rather than on drawer open) and swaps itself for an inline audio player.
- * Always tries to fetch the recording regardless of has_recording flag,
- * since the flag can be stale (Sonex may have finished uploading since the
- * call list was fetched).
+ * Loads the signed recording URL on demand and renders a premium custom
+ * audio player with a seekable progress bar, MM:SS time display, volume
+ * slider, and auto-retry capability.
  */
 function RecordingInline({ id, hasRecording }: { id: string; hasRecording: boolean }) {
-  const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'empty'>('idle');
-  const [recording, setRecording] = useState<CallRecording | null>(null);
-  const [error, setError] = useState('');
+  const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState('');
 
-  async function play() {
-    setState('loading');
-    setError('');
+  async function loadRecording() {
+    setFetchState('loading');
+    setFetchError('');
     try {
       const data = await api<CallRecording>(`/api/calls/${id}/recording`);
       if (!data?.url) {
-        setState('empty');
-        setError('Recording is not yet available. It may still be processing — try again in a moment.');
+        setFetchState('error');
+        setFetchError('Recording URL was empty. Sonex may still be processing it — try again in a few seconds.');
         return;
       }
-      setRecording(data);
-      setState('ready');
+      setRecordingUrl(data.url);
+      setExpiresAt(data.expires_at);
+      setFetchState('ready');
     } catch (err) {
-      setState('empty');
-      setError((err as Error).message || 'Could not load recording.');
+      setFetchState('error');
+      setFetchError((err as Error).message || 'Could not load recording.');
     }
   }
 
-  if (state === 'ready' && recording?.url) {
+  if (fetchState === 'idle' || fetchState === 'loading') {
     return (
-      <div>
-        <audio controls autoPlay className="h-9 w-full" src={recording.url} />
-        <p className="mt-1.5 text-[11px] text-ink-faint">Signed link expires {dateTime(recording.expires_at)} (valid 15 minutes).</p>
+      <div className="flex items-center gap-3">
+        <button
+          className="inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-medium text-brand-700 transition-all hover:bg-brand-100 hover:shadow-sm disabled:opacity-60"
+          onClick={loadRecording}
+          disabled={fetchState === 'loading'}
+        >
+          {fetchState === 'loading' ? (
+            <>
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+              Fetching recording…
+            </>
+          ) : (
+            <>
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="7" cy="7" r="6.25" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M5.5 4.8 10 7 5.5 9.2Z" fill="currentColor" />
+              </svg>
+              Load recording
+            </>
+          )}
+        </button>
+        {!hasRecording && fetchState === 'idle' && (
+          <span className="text-[11px] text-amber-600">Sonex may not have a recording for this call</span>
+        )}
+      </div>
+    );
+  }
+
+  if (fetchState === 'error') {
+    return (
+      <div className="space-y-2">
+        <p className="text-[11px] text-rose-600">{fetchError}</p>
+        <button
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700"
+          onClick={loadRecording}
+        >
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M1.5 6A4.5 4.5 0 1 1 6 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            <path d="M1.5 3.5V6H4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Try again
+        </button>
       </div>
     );
   }
 
   return (
     <div>
+      <AudioPlayer url={recordingUrl!} />
+      {expiresAt && (
+        <p className="mt-2 text-[10px] text-ink-faint">
+          Signed link expires {dateTime(expiresAt)} · valid 15 min
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------- AudioPlayer */
+
+function fmtTime(secs: number): string {
+  if (!isFinite(secs) || secs < 0) return '0:00';
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function AudioPlayer({ url }: { url: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [dragging, setDragging] = useState(false);
+  const [dragTime, setDragTime] = useState(0);
+
+  const displayTime = dragging ? dragTime : currentTime;
+  const progress = duration > 0 ? displayTime / duration : 0;
+
+  // Sync audio events → state
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    const onTime = () => setCurrentTime(a.currentTime);
+    const onDur = () => setDuration(a.duration || 0);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onEnded = () => { setPlaying(false); setCurrentTime(0); };
+    a.addEventListener('timeupdate', onTime);
+    a.addEventListener('durationchange', onDur);
+    a.addEventListener('loadedmetadata', onDur);
+    a.addEventListener('play', onPlay);
+    a.addEventListener('pause', onPause);
+    a.addEventListener('ended', onEnded);
+    return () => {
+      a.removeEventListener('timeupdate', onTime);
+      a.removeEventListener('durationchange', onDur);
+      a.removeEventListener('loadedmetadata', onDur);
+      a.removeEventListener('play', onPlay);
+      a.removeEventListener('pause', onPause);
+      a.removeEventListener('ended', onEnded);
+    };
+  }, []);
+
+  function togglePlay() {
+    const a = audioRef.current;
+    if (!a) return;
+    if (playing) a.pause(); else a.play();
+  }
+
+  function seekTo(ratio: number) {
+    const a = audioRef.current;
+    if (!a || !duration) return;
+    const t = Math.max(0, Math.min(1, ratio)) * duration;
+    a.currentTime = t;
+    setCurrentTime(t);
+  }
+
+  function getRatioFromEvent(e: React.MouseEvent | MouseEvent): number {
+    const track = trackRef.current;
+    if (!track) return 0;
+    const rect = track.getBoundingClientRect();
+    return (e.clientX - rect.left) / rect.width;
+  }
+
+  function onTrackClick(e: React.MouseEvent) {
+    seekTo(getRatioFromEvent(e));
+  }
+
+  function onThumbMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    setDragging(true);
+    const move = (mv: MouseEvent) => {
+      const t = Math.max(0, Math.min(1, getRatioFromEvent(mv))) * duration;
+      setDragTime(t);
+    };
+    const up = (upEv: MouseEvent) => {
+      seekTo(getRatioFromEvent(upEv));
+      setDragging(false);
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+
+  function onVolumeChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const v = Number(e.target.value);
+    setVolume(v);
+    if (audioRef.current) audioRef.current.volume = v;
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white p-4 shadow-sm">
+      <audio ref={audioRef} src={url} preload="metadata" />
+
       <div className="flex items-center gap-3">
-        <button className="btn-ghost !h-8 gap-1.5 !px-3 text-xs" onClick={play} disabled={state === 'loading'}>
-          {state === 'loading' ? (
-            <span className="flex items-center gap-1.5">
-              <span className="h-3 w-3 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
-              Loading…
-            </span>
+        {/* Play / Pause */}
+        <button
+          onClick={togglePlay}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-500 text-white shadow-md transition-all hover:bg-brand-600 hover:scale-105 active:scale-95"
+          aria-label={playing ? 'Pause' : 'Play'}
+        >
+          {playing ? (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+              <rect x="2" y="1.5" width="3.5" height="11" rx="1" />
+              <rect x="8.5" y="1.5" width="3.5" height="11" rx="1" />
+            </svg>
           ) : (
-            <>
-              <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
-                <path d="M3 2.2 10 6 3 9.8Z" fill="currentColor" />
-              </svg>
-              Play recording
-            </>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+              <path d="M3 1.8 12.5 7 3 12.2Z" />
+            </svg>
           )}
         </button>
-        {!hasRecording && state === 'idle' && (
-          <span className="text-[11px] text-amber-600">May not be available for this call</span>
-        )}
+
+        {/* Progress track + time */}
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          {/* Track */}
+          <div
+            ref={trackRef}
+            className="group relative h-2 cursor-pointer rounded-full bg-slate-200"
+            onClick={onTrackClick}
+          >
+            {/* Filled bar */}
+            <div
+              className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-600 transition-[width] duration-75"
+              style={{ width: `${progress * 100}%` }}
+            />
+            {/* Draggable thumb */}
+            <div
+              className={cx(
+                'absolute top-1/2 -translate-y-1/2 h-4 w-4 -translate-x-1/2 rounded-full border-2 border-white bg-brand-500 shadow-md ring-2 ring-brand-200 transition-opacity',
+                dragging ? 'opacity-100 scale-125' : 'opacity-0 group-hover:opacity-100',
+              )}
+              style={{ left: `${progress * 100}%` }}
+              onMouseDown={onThumbMouseDown}
+            />
+          </div>
+
+          {/* Time labels */}
+          <div className="flex justify-between text-[10px] tabular-nums text-ink-faint">
+            <span className={dragging ? 'font-medium text-brand-600' : ''}>{fmtTime(displayTime)}</span>
+            <span>{fmtTime(duration)}</span>
+          </div>
+        </div>
+
+        {/* Volume */}
+        <div className="group relative flex items-center">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="shrink-0 text-ink-faint" aria-hidden="true">
+            {volume === 0 ? (
+              <path d="M3 6h2.5L9 3v10L5.5 10H3zM12 6l2 4M14 6l-2 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            ) : (
+              <>
+                <path d="M3 6h2.5L9 3v10L5.5 10H3z" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M12 5.5a3.5 3.5 0 0 1 0 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </>
+            )}
+          </svg>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={onVolumeChange}
+            className="ml-1.5 w-16 accent-brand-500"
+            aria-label="Volume"
+          />
+        </div>
       </div>
-      {state === 'empty' && <p className="mt-1.5 text-[11px] text-rose-600">{error}</p>}
     </div>
   );
 }
