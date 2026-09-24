@@ -15,6 +15,7 @@ const impl = useSupabase ? supabaseStore : fileStore;
 export const listTenants = impl.listTenants;
 export const getTenantRaw = impl.getTenantRaw;
 export const getTenantPublic = impl.getTenantPublic;
+export const toPublic = impl.toPublic;
 export const getTenantByUsername = impl.getTenantByUsername;
 export const createTenant = impl.createTenant;
 export const updateTenant = impl.updateTenant;

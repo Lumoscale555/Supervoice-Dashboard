@@ -36,7 +36,7 @@ for (const t of tenants) {
 }
 
 
-function toPublic(t) {
+export function toPublic(t) {
   const { passwordHash, sonexApiKey, ...rest } = t;
   return {
     ...rest,

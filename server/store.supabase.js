@@ -42,7 +42,7 @@ function fromRow(row) {
   };
 }
 
-function toPublic(t) {
+export function toPublic(t) {
   const { passwordHash, sonexApiKey, ...rest } = t;
   return {
     ...rest,

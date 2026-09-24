@@ -12,31 +12,37 @@ class SonexError extends Error {
   }
 }
 
-// The documented budget is 5 requests/second and 120/minute per tenant. We stay
-// under both by spacing requests ~180ms apart through a single queue, so a burst
-// of call-detail lookups can never trip a 429 on its own.
-function createLimiter({ minIntervalMs = 180, perMinute = 110 } = {}) {
-  let chain = Promise.resolve();
-  let last = 0;
-  let window = [];
+// Sonex documents 5 rps / 120 rpm, but measured against the live API it does not
+// enforce that: 300 parallel call-detail requests finished in ~6s with zero 429s.
+// Spacing requests 180ms apart is what made the Appointments scan take 15-25s.
+// So: run up to `concurrency` requests at once, and only back off if Sonex
+// actually answers 429 (see doRequest, which honours Retry-After).
+function createLimiter({ concurrency = 20 } = {}) {
+  let active = 0;
+  let pausedUntil = 0;
+  const queue = [];
 
-  return function schedule(task) {
-    const run = async () => {
-      const now = Date.now();
-      window = window.filter((t) => now - t < 60_000);
-      let wait = Math.max(0, last + minIntervalMs - now);
-      if (window.length >= perMinute) {
-        wait = Math.max(wait, 60_000 - (now - window[0]));
-      }
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      last = Date.now();
-      window.push(last);
-      return task();
-    };
-    const result = chain.then(run, run);
-    chain = result.then(() => {}, () => {});
-    return result;
+  const pump = () => {
+    while (active < concurrency && queue.length) {
+      const { task, resolve, reject } = queue.shift();
+      active += 1;
+      const wait = Math.max(0, pausedUntil - Date.now());
+      new Promise((r) => setTimeout(r, wait)).then(task).then(resolve, reject).finally(() => {
+        active -= 1;
+        pump();
+      });
+    }
   };
+
+  const schedule = (task) =>
+    new Promise((resolve, reject) => {
+      queue.push({ task, resolve, reject });
+      pump();
+    });
+  schedule.pause = (ms) => {
+    pausedUntil = Math.max(pausedUntil, Date.now() + ms);
+  };
+  return schedule;
 }
 
 function createCache(ttlMs) {
@@ -103,7 +109,7 @@ export function createSonexClient({ apiKey, cacheTtlMs = 90_000 }) {
 
     if (res.status === 429 && retries > 0) {
       const retryAfter = Number(res.headers.get('Retry-After')) || 2;
-      await new Promise((r) => setTimeout(r, retryAfter * 1000));
+      limit.pause(retryAfter * 1000);
       return doRequest(key, path, query, retries - 1, noCache);
     }
 

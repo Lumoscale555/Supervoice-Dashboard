@@ -126,8 +126,8 @@ export async function collectAppointments(client, { toolMap = DEFAULT_TOOL_MAP, 
   const appointments = [];
   const failures = [];
 
-  for (let i = 0; i < candidates.length; i += 8) {
-    const batch = candidates.slice(i, i + 8);
+  for (let i = 0; i < candidates.length; i += 25) {
+    const batch = candidates.slice(i, i + 25);
     const settled = await Promise.allSettled(batch.map((s) => client.getCall(s.id, 'tool_calls')));
     settled.forEach((r, j) => {
       if (r.status === 'fulfilled') appointments.push(...appointmentsFromCall({ ...batch[j], ...r.value }, toolMap));

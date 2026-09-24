@@ -130,10 +130,23 @@ async function overviewPayload(req) {
   };
 }
 
+// Every request needs the tenant row (a Supabase round trip, 300ms-1s). Keep it
+// briefly in memory; admin edits/deletes drop the entry on this instance.
+const tenantCache = new Map();
+const TENANT_TTL_MS = 15_000;
+async function cachedTenant(id) {
+  const hit = tenantCache.get(id);
+  if (hit && Date.now() - hit.at < TENANT_TTL_MS) return hit.tenant;
+  const tenant = await store.getTenantRaw(id);
+  if (tenant) tenantCache.set(id, { tenant, at: Date.now() });
+  else tenantCache.delete(id);
+  return tenant;
+}
+
 /** Loads the tenant behind the session onto req.tenant + a scoped client. */
 async function loadTenant(req, res, next) {
   try {
-    const tenant = await store.getTenantRaw(req.authSession.tenantId);
+    const tenant = await cachedTenant(req.authSession.tenantId);
     if (!tenant) {
       clearSessionCookie(res);
       return res.status(401).json({ error: { message: 'Session expired. Sign in again.', status: 401 } });
@@ -191,11 +204,11 @@ app.get(
   route(async (req) => {
     if (req.authSession?.role === 'admin') return { role: 'admin' };
     if (req.authSession?.role === 'client' && req.authSession.tenantId) {
-      const tenant = await store.getTenantRaw(req.authSession.tenantId);
+      const tenant = await cachedTenant(req.authSession.tenantId);
       if (tenant) {
         return {
           role: 'client',
-          tenant: await store.getTenantPublic(tenant.id),
+          tenant: store.toPublic(tenant),
           mode: tenantMode(tenant),
           pricing: { rate_per_minute_inr: tenant.clientRateInrPerMin },
         };
@@ -210,7 +223,7 @@ app.get(
   requireClient,
   loadTenant,
   route(async (req) => ({
-    tenant: await store.getTenantPublic(req.tenant.id),
+    tenant: store.toPublic(req.tenant),
     mode: tenantMode(req.tenant),
     pricing: { rate_per_minute_inr: req.tenant.clientRateInrPerMin },
   })),
@@ -386,7 +399,7 @@ app.get(
     const { from, to } = resolveRange(req.query);
     const toolMap = req.query.tools ? JSON.parse(req.query.tools) : DEFAULT_TOOL_MAP;
     const scanLimit = Math.min(Number(req.query.scan_limit) || 80, 200);
-    const BATCH = 8;
+    const BATCH = 25;
 
     const calls = await getCalls(req.tenant, req.client, windowISO(from, to));
     const eligible = calls.filter(isScannable);
@@ -480,6 +493,7 @@ app.patch(
     if (!updated) throw Object.assign(new Error('Tenant not found.'), { status: 404 });
     clearTenantClientCache(req.params.id);
     clearMirror(req.params.id);
+    tenantCache.delete(req.params.id);
     return { data: updated };
   }),
 );
@@ -491,6 +505,7 @@ app.delete(
     const ok = await store.deleteTenant(req.params.id);
     clearTenantClientCache(req.params.id);
     clearMirror(req.params.id);
+    tenantCache.delete(req.params.id);
     if (!ok) throw Object.assign(new Error('Tenant not found.'), { status: 404 });
     return { ok: true };
   }),

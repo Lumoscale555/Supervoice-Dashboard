@@ -21,7 +21,7 @@ export default function Appointments() {
 
   const { items, meta, error, streaming, initial, refresh } = useStreamQuery<Appointment>(
     '/api/appointments/stream',
-    { range, scan_limit: 80 },
+    { range, scan_limit: 200 },
   );
 
   const rows = useMemo(() => {
