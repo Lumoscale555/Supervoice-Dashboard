@@ -34,8 +34,8 @@ Each client has two rates, set per-tenant in the admin console:
 - **Client rate** — what you charge that client, e.g. ₹5/min.
 - **Provider cost** — what Sonex charges you to run their calls, e.g. ₹2.50/min.
 
-Both are billed the same way: a **flat rate, pulsed every 30 seconds** — every
-started pulse is a full billing unit, and only calls that connected are
+Both are billed the same way: a **flat per-minute rate on exact talk time**,
+and only calls that connected are
 billed. **Margin = client rate − provider cost.** The client's own dashboard
 (`/billing`) shows only their rate and what they owe; provider cost and margin
 are computed only for the admin (`/admin`, per-client "Billing" panel) and are
@@ -120,7 +120,7 @@ an inline recording player, not raw tool calls.
 ```
 server/
   sonex.js            Real API client — auth, 5 req/s + 120 req/min pacing, 429 retry, response cache
-  pricing.js            Flat, pulse-billed rate — client rate and (admin-only) provider cost + margin
+  pricing.js            Flat per-minute rate — client rate and (admin-only) provider cost + margin
   billing.js             Aggregates a tenant's calls into day breakdowns using pricing.js
   appointments.js      Derives appointment rows from a tenant's calls' tool_calls
   crypto.js            Password hashing (scrypt) shared by both store backends

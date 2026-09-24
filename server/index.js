@@ -88,7 +88,7 @@ const daysAgo = (n) => new Date(Date.now() - n * 86400000);
 const isoDate = (d) => d.toISOString().slice(0, 10);
 
 function resolveRange(query) {
-  const days = { '7d': 7, '30d': 30, '90d': 90 }[query.range] || 30;
+  const days = { today: 1, '7d': 7, '30d': 30, '90d': 90 }[query.range] || 30;
   return {
     days,
     from: query.from || isoDate(daysAgo(days - 1)),
@@ -163,7 +163,7 @@ app.get(
           role: 'client',
           tenant: await store.getTenantPublic(tenant.id),
           mode: tenantMode(tenant),
-          pricing: { rate_per_minute_inr: tenant.clientRateInrPerMin, pulse_seconds: tenant.pulseSeconds },
+          pricing: { rate_per_minute_inr: tenant.clientRateInrPerMin },
         };
       }
     }
@@ -178,7 +178,7 @@ app.get(
   route(async (req) => ({
     tenant: await store.getTenantPublic(req.tenant.id),
     mode: tenantMode(req.tenant),
-    pricing: { rate_per_minute_inr: req.tenant.clientRateInrPerMin, pulse_seconds: req.tenant.pulseSeconds },
+    pricing: { rate_per_minute_inr: req.tenant.clientRateInrPerMin },
   })),
 );
 
@@ -212,23 +212,23 @@ app.get(
     const { days, from, to } = resolveRange(req.query);
     const tz = TIMEZONE;
 
-    const [calls, balance, recent] = await Promise.all([
+    const prevTo = new Date(new Date(from).getTime() - 86400000);
+    const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
+
+    const [calls, balance, recent, prevCalls] = await Promise.all([
       req.client.listAllCalls({
         started_after: new Date(from + 'T00:00:00Z').toISOString(),
         started_before: new Date(to + 'T23:59:59Z').toISOString(),
       }),
       req.client.getBalance(),
       req.client.listCalls({ limit: 8 }),
+      req.client.listAllCalls({
+        started_after: new Date(prevFrom.toISOString().slice(0, 10) + 'T00:00:00Z').toISOString(),
+        started_before: new Date(prevTo.toISOString().slice(0, 10) + 'T23:59:59Z').toISOString(),
+      }),
     ]);
 
     const summary = buildBillingSummary(calls, req.tenant);
-
-    const prevTo = new Date(new Date(from).getTime() - 86400000);
-    const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
-    const prevCalls = await req.client.listAllCalls({
-      started_after: new Date(prevFrom.toISOString().slice(0, 10) + 'T00:00:00Z').toISOString(),
-      started_before: new Date(prevTo.toISOString().slice(0, 10) + 'T23:59:59Z').toISOString(),
-    });
     const previous = buildBillingSummary(prevCalls, req.tenant).totals;
 
     return {
@@ -466,7 +466,7 @@ app.get(
 
     return {
       range: { from, to, days, timezone: TIMEZONE },
-      pricing: { rate_per_minute_inr: req.tenant.clientRateInrPerMin, pulse_seconds: req.tenant.pulseSeconds },
+      pricing: { rate_per_minute_inr: req.tenant.clientRateInrPerMin },
       balance,
       summary,
     };

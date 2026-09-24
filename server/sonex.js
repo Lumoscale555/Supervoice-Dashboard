@@ -61,9 +61,10 @@ function createCache(ttlMs) {
   };
 }
 
-export function createSonexClient({ apiKey, cacheTtlMs = 30_000 }) {
+export function createSonexClient({ apiKey, cacheTtlMs = 90_000 }) {
   const limit = createLimiter();
   const cache = createCache(cacheTtlMs);
+  const inflight = new Map();
 
   // noCache=true skips both the read and write of the cache.
   // Use for signed URLs (recordings) and any response that must always be fresh.
@@ -79,6 +80,17 @@ export function createSonexClient({ apiKey, cacheTtlMs = 30_000 }) {
       if (cached !== undefined) return cached;
     }
 
+    // Share one in-flight fetch between identical concurrent requests.
+    if (!noCache && inflight.has(key)) return inflight.get(key);
+    const p = doRequest(key, path, query, retries, noCache);
+    if (!noCache) {
+      inflight.set(key, p);
+      p.then(() => inflight.delete(key), () => inflight.delete(key));
+    }
+    return p;
+  }
+
+  async function doRequest(key, path, query, retries, noCache) {
     const res = await limit(() =>
       fetch(key, {
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
@@ -88,7 +100,7 @@ export function createSonexClient({ apiKey, cacheTtlMs = 30_000 }) {
     if (res.status === 429 && retries > 0) {
       const retryAfter = Number(res.headers.get('Retry-After')) || 2;
       await new Promise((r) => setTimeout(r, retryAfter * 1000));
-      return request(path, { query, retries: retries - 1, noCache });
+      return doRequest(key, path, query, retries - 1, noCache);
     }
 
     const text = await res.text();

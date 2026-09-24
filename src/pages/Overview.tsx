@@ -165,7 +165,7 @@ export default function Overview() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Card title="Call volume" subtitle={`${data?.range?.days ?? 30}-day trend, daily`} className="xl:col-span-2">
+        <Card title="Call volume" subtitle={data?.range?.days === 1 ? "Today, daily" : `${data?.range?.days ?? 30}-day trend, daily`} className="xl:col-span-2">
           {initial ? (
             <Skeleton className="h-[220px]" />
           ) : volume.length ? (

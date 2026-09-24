@@ -15,9 +15,9 @@ function tally(rows, keyFn) {
 
 export function buildBillingSummary(calls, tenant, { withMargin = false } = {}) {
   const priced = calls.map((c) => {
-    const cost_inr = costForCall(c, tenant.clientRateInrPerMin, tenant.pulseSeconds);
+    const cost_inr = costForCall(c, tenant.clientRateInrPerMin);
     if (!withMargin) return { ...c, cost_inr };
-    const provider_cost_inr = costForCall(c, tenant.providerCostInrPerMin, tenant.pulseSeconds);
+    const provider_cost_inr = costForCall(c, tenant.providerCostInrPerMin);
     return { ...c, cost_inr, provider_cost_inr, margin_inr: +(cost_inr - provider_cost_inr).toFixed(2) };
   });
 

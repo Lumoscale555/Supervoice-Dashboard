@@ -193,8 +193,9 @@ export function PageHeader({
             value={range}
             onChange={onRangeChange}
             options={[
-              { value: '7d', label: '7 days' },
-              { value: '30d', label: '30 days' },
+              { value: 'today', label: 'Today' },
+              { value: '7d', label: 'Week' },
+              { value: '30d', label: 'Month' },
               { value: '90d', label: '90 days' },
             ]}
           />

@@ -23,7 +23,7 @@ export interface CallSummary {
   duration_secs: number;
   has_recording: boolean;
   has_transcript: boolean;
-  /** This tenant's own rate: Rs.X/min, billed in pulses. 0 for calls that didn't connect. */
+  /** This tenant's own rate: Rs.X/min. 0 for calls that didn't connect. */
   cost_inr: number;
 }
 
@@ -140,12 +140,12 @@ export interface Overview {
 
 export interface Billing {
   range: { from: string; to: string; days: number; timezone: string };
-  pricing: { rate_per_minute_inr: number; pulse_seconds: number };
+  pricing: { rate_per_minute_inr: number };
   balance: Balance;
   summary: BillingSummary;
 }
 
-export type RangeKey = '7d' | '30d' | '90d';
+export type RangeKey = 'today' | '7d' | '30d' | '90d';
 
 /* ------------------------------------------------------------- Tenancy */
 
@@ -156,7 +156,6 @@ export interface TenantPublic {
   agentName: string | null;
   clientRateInrPerMin: number;
   providerCostInrPerMin: number;
-  pulseSeconds: number;
   createdAt: string;
   updatedAt: string;
   hasApiKey: boolean;
@@ -166,7 +165,7 @@ export interface TenantPublic {
 export interface AuthMe {
   tenant: TenantPublic;
   mode: 'no_key' | 'live';
-  pricing: { rate_per_minute_inr: number; pulse_seconds: number };
+  pricing: { rate_per_minute_inr: number };
 }
 
 /** One call, priced both ways — admin/owner eyes only, never sent to a client's own session. */

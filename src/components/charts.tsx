@@ -149,7 +149,7 @@ export interface SpendPoint {
   cost_inr: number;
 }
 
-/** Flat-rate billing (Rs.5/min, 30s pulse) is one number per day — one series,
+/** Flat-rate billing (Rs.5/min) is one number per day — one series,
  *  so the title names it and no legend box is needed. */
 export function SpendChart({ data, height = 240 }: { data: SpendPoint[]; height?: number }) {
   const money = (n: number) => `₹${n.toFixed(2)}`;

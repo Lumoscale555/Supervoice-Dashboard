@@ -78,7 +78,6 @@ export async function createTenant(input) {
     agentName: input.agentName || null,
     clientRateInrPerMin: Number(input.clientRateInrPerMin) || 5,
     providerCostInrPerMin: Number(input.providerCostInrPerMin) || 2.5,
-    pulseSeconds: Number(input.pulseSeconds) || 30,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -101,7 +100,6 @@ export async function updateTenant(id, patch) {
   if (patch.agentName !== undefined) t.agentName = patch.agentName || null;
   if (patch.clientRateInrPerMin !== undefined) t.clientRateInrPerMin = Number(patch.clientRateInrPerMin);
   if (patch.providerCostInrPerMin !== undefined) t.providerCostInrPerMin = Number(patch.providerCostInrPerMin);
-  if (patch.pulseSeconds !== undefined) t.pulseSeconds = Number(patch.pulseSeconds);
   t.updatedAt = new Date().toISOString();
   persist();
   return toPublic(t);

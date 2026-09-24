@@ -29,7 +29,6 @@ export default function Billing() {
   const wallet = data?.balance.wallet;
   const totals = data?.summary.totals;
   const rate = data?.pricing.rate_per_minute_inr ?? 5;
-  const pulse = data?.pricing.pulse_seconds ?? 30;
 
   return (
     <div>
@@ -41,9 +40,7 @@ export default function Billing() {
           <path d="M8 7.2V11M8 5.3v.1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
         <p>
-          Flat-rate billing: <strong className="text-ink">₹{rate} per minute</strong>, charged in{' '}
-          <strong className="text-ink">{pulse}-second pulses</strong> — every started {pulse}s block is billed in full (₹{(rate / (60 / pulse)).toFixed(2)}
-          /pulse). Only calls that connected are billed; no-answer and failed calls cost nothing.
+          Flat-rate billing: <strong className="text-ink">₹{rate} per minute</strong>, charged for the exact talk time. Only calls that connected are billed; no-answer and failed calls cost nothing.
         </p>
       </div>
 
@@ -59,7 +56,7 @@ export default function Billing() {
           )}
         </Card>
 
-        <Card title="This period" subtitle={`${data?.range.days ?? 30}-day summary`} className="lg:col-span-2">
+        <Card title="This period" subtitle={data?.range.days === 1 ? "Today" : `${data?.range.days ?? 30}-day summary`} className="lg:col-span-2">
           {initial ? (
             <Skeleton className="h-40" />
           ) : (
@@ -73,7 +70,7 @@ export default function Billing() {
         </Card>
       </div>
 
-      <Card title="Daily spend" subtitle={`Flat rate — ₹${rate}/min, ${pulse}s pulse`} className="mt-6">
+      <Card title="Daily spend" subtitle={`Flat rate — ₹${rate}/min, exact minutes`} className="mt-6">
         {initial ? (
           <Skeleton className="h-[240px]" />
         ) : spendSeries.length ? (

@@ -1,4 +1,4 @@
-// Shared formatters. Billing is a single flat rate (Rs.5/min, 30s pulse) in
+// Shared formatters. Billing is a single flat rate (Rs.5/min) in
 // INR, so there is one currency formatter rather than a multi-currency split.
 
 export const inr = (n: number | undefined | null) =>
