@@ -17,7 +17,7 @@ import compression from 'compression';
 import cors from 'cors';
 import 'dotenv/config';
 
-import { collectAppointments, DEFAULT_TOOL_MAP } from './appointments.js';
+import { collectAppointments, appointmentsFromCall, DEFAULT_TOOL_MAP } from './appointments.js';
 import { priceCall, priceCallWithMargin } from './pricing.js';
 import { buildBillingSummary } from './billing.js';
 import { getScopedClient, tenantMode, clearTenantClientCache } from './tenantClient.js';
@@ -47,6 +47,42 @@ const route = (handler) => async (req, res) => {
     res.status(status).json({ error: { message: err.message, status } });
   }
 };
+
+/**
+ * Opens an SSE connection and provides a send/done/error helper.
+ * The handler receives (req, sse) where sse.send(chunk), sse.done(), sse.error(msg).
+ */
+function sseRoute(handler) {
+  return async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
+    res.flushHeaders();
+
+    const sse = {
+      send(chunk) {
+        res.write(`data: ${JSON.stringify({ event: 'chunk', chunk })}\n\n`);
+        // flush if available (compression middleware)
+        if (typeof res.flush === 'function') res.flush();
+      },
+      done() {
+        res.write(`data: ${JSON.stringify({ event: 'done' })}\n\n`);
+        res.end();
+      },
+      error(message, status = 502) {
+        res.write(`data: ${JSON.stringify({ event: 'error', message, status })}\n\n`);
+        res.end();
+      },
+    };
+
+    try {
+      await handler(req, sse);
+    } catch (err) {
+      try { sse.error(err.message, err.status || 502); } catch { /* already closed */ }
+    }
+  };
+}
 
 const daysAgo = (n) => new Date(Date.now() - n * 86400000);
 const isoDate = (d) => d.toISOString().slice(0, 10);
@@ -225,6 +261,49 @@ app.get(
   }),
 );
 
+// ---------------------------------------------------------------------------
+// SSE: stream call list pages as they arrive from Sonex
+// IMPORTANT: must be registered BEFORE /api/calls/:id so Express does not
+// treat the literal word 'stream' as a call ID.
+// ---------------------------------------------------------------------------
+app.get(
+  '/api/calls/stream',
+  requireClient,
+  loadTenant,
+  sseRoute(async (req, sse) => {
+    const { status, direction, phone_number, started_after, started_before, limit = 25, max_pages = 20 } = req.query;
+    const base = req.client;
+    let cursor;
+    let page = 0;
+    const maxPages = Math.min(Number(max_pages), 20);
+
+    while (page < maxPages) {
+      const res = await base.listCalls({
+        limit: Math.min(Number(limit), 100),
+        cursor,
+        status: status || undefined,
+        direction: direction || undefined,
+        phone_number: phone_number || undefined,
+        started_after: started_after || undefined,
+        started_before: started_before || undefined,
+      });
+
+      const priced = (res.data || []).map((c) => priceCall(c, req.tenant));
+      sse.send({
+        data: priced,
+        has_more: Boolean(res.has_more),
+        next_cursor: res.next_cursor ?? null,
+        page,
+      });
+
+      if (!res.has_more || !res.next_cursor) break;
+      cursor = res.next_cursor;
+      page += 1;
+    }
+    sse.done();
+  }),
+);
+
 app.get(
   '/api/calls/:id',
   requireClient,
@@ -239,7 +318,20 @@ app.get(
   '/api/calls/:id/recording',
   requireClient,
   loadTenant,
-  route((req) => req.client.getRecording(req.params.id)),
+  route(async (req) => {
+    // Always attempt to fetch the recording regardless of has_recording flag,
+    // since the flag can be stale on cached responses or missing for some providers.
+    try {
+      const rec = await req.client.getRecording(req.params.id);
+      return rec;
+    } catch (err) {
+      // Surface a clean message so the frontend can show it properly.
+      throw Object.assign(
+        new Error(err.message || 'No recording available for this call.'),
+        { status: err.status || 404 },
+      );
+    }
+  }),
 );
 
 app.get(
@@ -269,6 +361,78 @@ app.get(
   }),
 );
 
+// ---------------------------------------------------------------------------
+// SSE: stream appointments as tool-call details are fetched.
+// Emits appointments in batches as parallel detail fetches resolve.
+// ---------------------------------------------------------------------------
+app.get(
+  '/api/appointments/stream',
+  requireClient,
+  loadTenant,
+  sseRoute(async (req, sse) => {
+    const { from, to } = resolveRange(req.query);
+    const toolMap = req.query.tools ? JSON.parse(req.query.tools) : DEFAULT_TOOL_MAP;
+    const scanLimit = Math.min(Number(req.query.scan_limit) || 80, 200);
+    const BATCH = 8; // parallel getCall requests per batch
+
+    // First emit the range meta immediately so the frontend knows the window.
+    sse.send({ data: [], range: { from, to }, scanned_calls: 0, total_calls_in_window: 0, truncated: false, failures: [], streaming: true });
+
+    const calls = await req.client.listAllCalls({
+      started_after: new Date(from + 'T00:00:00Z').toISOString(),
+      started_before: new Date(to + 'T23:59:59Z').toISOString(),
+    }, { maxPages: Math.ceil(scanLimit / 100) || 1 });
+
+    const candidates = calls.slice(0, scanLimit);
+    let scanned = 0;
+    const failures = [];
+    const allAppointments = [];
+
+    for (let i = 0; i < candidates.length; i += BATCH) {
+      const batch = candidates.slice(i, i + BATCH);
+      const settled = await Promise.allSettled(
+        batch.map((s) => req.client.getCall(s.id, 'tool_calls'))
+      );
+
+      const batchAppointments = [];
+      for (let j = 0; j < settled.length; j++) {
+        const result = settled[j];
+        scanned += 1;
+        if (result.status === 'fulfilled') {
+          const appts = appointmentsFromCall({ ...batch[j], ...result.value }, toolMap);
+          batchAppointments.push(...appts);
+          allAppointments.push(...appts);
+        } else {
+          failures.push({ call_id: batch[j].id, message: result.reason?.message || 'Error' });
+        }
+      }
+
+      if (batchAppointments.length > 0) {
+        sse.send({
+          data: batchAppointments,
+          scanned_calls: scanned,
+          total_calls_in_window: calls.length,
+          truncated: calls.length > candidates.length,
+          failures: [],
+          range: { from, to },
+          streaming: true,
+        });
+      }
+    }
+
+    sse.send({
+      data: [],
+      scanned_calls: scanned,
+      total_calls_in_window: calls.length,
+      truncated: calls.length > candidates.length,
+      failures,
+      range: { from, to },
+      streaming: false,
+    });
+    sse.done();
+  }),
+);
+
 // --- Billing (client-facing: their own rate only, no provider cost/margin) --
 app.get(
   '/api/billing',
@@ -293,6 +457,87 @@ app.get(
       balance,
       summary,
     };
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// SSE: stream overview — emits balance + recent calls fast, then KPI data.
+// ---------------------------------------------------------------------------
+app.get(
+  '/api/overview/stream',
+  requireClient,
+  loadTenant,
+  sseRoute(async (req, sse) => {
+    const { days, from, to } = resolveRange(req.query);
+    const tz = TIMEZONE;
+
+    // Step 1: balance + recent calls are very fast (2 requests).
+    const [balance, recent] = await Promise.all([
+      req.client.getBalance(),
+      req.client.listCalls({ limit: 8 }),
+    ]);
+    sse.send({
+      data: [],
+      balance,
+      recent_calls: recent.data.map((c) => priceCall(c, req.tenant)),
+      range: { from, to, days, timezone: tz },
+      summary: null,
+      previous: null,
+      streaming: true,
+    });
+
+    // Step 2: paginate current-period calls and stream partial summaries.
+    let allCalls = [];
+    let cursor;
+    let page = 0;
+    const maxPages = 20;
+    while (page < maxPages) {
+      const res = await req.client.listCalls({
+        limit: 100,
+        cursor,
+        started_after: new Date(from + 'T00:00:00Z').toISOString(),
+        started_before: new Date(to + 'T23:59:59Z').toISOString(),
+      });
+      const filtered = (res.data || []);
+      allCalls = allCalls.concat(filtered);
+
+      // Emit a partial summary so the UI can update immediately.
+      const partialSummary = buildBillingSummary(allCalls, req.tenant);
+      sse.send({
+        data: [],
+        balance,
+        recent_calls: recent.data.map((c) => priceCall(c, req.tenant)),
+        range: { from, to, days, timezone: tz },
+        summary: partialSummary,
+        previous: null,
+        streaming: true,
+      });
+
+      if (!res.has_more || !res.next_cursor) break;
+      cursor = res.next_cursor;
+      page += 1;
+    }
+
+    // Step 3: fetch previous period for delta comparison.
+    const prevTo = new Date(new Date(from).getTime() - 86400000);
+    const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
+    const prevCalls = await req.client.listAllCalls({
+      started_after: new Date(prevFrom.toISOString().slice(0, 10) + 'T00:00:00Z').toISOString(),
+      started_before: new Date(prevTo.toISOString().slice(0, 10) + 'T23:59:59Z').toISOString(),
+    });
+    const previous = buildBillingSummary(prevCalls, req.tenant).totals;
+    const summary = buildBillingSummary(allCalls, req.tenant);
+
+    sse.send({
+      data: [],
+      balance,
+      recent_calls: recent.data.map((c) => priceCall(c, req.tenant)),
+      range: { from, to, days, timezone: tz },
+      summary,
+      previous,
+      streaming: false,
+    });
+    sse.done();
   }),
 );
 

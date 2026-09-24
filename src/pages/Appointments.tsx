@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '../lib/api';
-import type { AppointmentsResponse, RangeKey } from '../lib/types';
+import { useStreamQuery } from '../lib/api';
+import type { Appointment, RangeKey } from '../lib/types';
 import { PageHeader } from '../components/Shell';
 import { Card, EmptyState, ErrorState, Skeleton, TableSkeleton, Th, Td, cx } from '../components/ui';
 import { dateTime, phone, titleCase } from '../lib/format';
@@ -18,22 +18,25 @@ const STATUS_STYLE: Record<string, string> = {
 export default function Appointments() {
   const [range, setRange] = useState<RangeKey>('30d');
   const [kindFilter, setKindFilter] = useState<string>('');
-  const { data, error, loading, initial, refresh } = useQuery<AppointmentsResponse>('/api/appointments', { range, scan_limit: 80 });
+
+  const { items, meta, error, streaming, initial, refresh } = useStreamQuery<Appointment>(
+    '/api/appointments/stream',
+    { range, scan_limit: 80 },
+  );
 
   const rows = useMemo(() => {
-    const list = data?.data ?? [];
-    return kindFilter ? list.filter((a) => a.status === kindFilter) : list;
-  }, [data, kindFilter]);
+    return kindFilter ? items.filter((a) => a.status === kindFilter) : items;
+  }, [items, kindFilter]);
 
-  const summary = useMemo(() => {
-    const list = data?.data ?? [];
-    return {
-      booked: list.filter((a) => a.status === 'booked').length,
-      rescheduled: list.filter((a) => a.status === 'rescheduled').length,
-      cancelled: list.filter((a) => a.status === 'cancelled').length,
-      failed: list.filter((a) => a.status === 'failed').length,
-    };
-  }, [data]);
+  const summary = useMemo(() => ({
+    booked: items.filter((a) => a.status === 'booked').length,
+    rescheduled: items.filter((a) => a.status === 'rescheduled').length,
+    cancelled: items.filter((a) => a.status === 'cancelled').length,
+    failed: items.filter((a) => a.status === 'failed').length,
+  }), [items]);
+
+  const scannedCalls = Number((meta as Record<string, unknown>).scanned_calls ?? 0);
+  const totalCalls = Number((meta as Record<string, unknown>).total_calls_in_window ?? 0);
 
   return (
     <div>
@@ -58,7 +61,7 @@ export default function Appointments() {
       </div>
 
       <Card className="mt-6" bodyClassName="!px-0 !py-0">
-        {error && !data ? (
+        {error && !items.length ? (
           <div className="p-4">
             <ErrorState message={error} onRetry={refresh} />
           </div>
@@ -66,7 +69,7 @@ export default function Appointments() {
           <div className="p-4">
             <TableSkeleton rows={6} cols={6} />
           </div>
-        ) : !rows.length ? (
+        ) : !rows.length && !streaming ? (
           <EmptyState
             title="No appointments found"
             body="No booking tool calls were found in the scanned calls for this period. If your agent uses different tool names, adjust the tool map — see Settings."
@@ -112,13 +115,49 @@ export default function Appointments() {
                     </Td>
                   </tr>
                 ))}
+                {/* Shimmer rows while scanning more calls */}
+                {streaming && (
+                  <tr className="border-b border-line last:border-0">
+                    {Array.from({ length: 7 }).map((_, i) => (
+                      <td key={i} className="px-4 py-3">
+                        <div className="h-4 w-full animate-pulse rounded bg-slate-100" />
+                      </td>
+                    ))}
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         )}
       </Card>
 
-      {loading && !initial && <p className="mt-4 text-center text-[11px] text-ink-faint">Refreshing…</p>}
+      {/* Progress bar while scanning calls */}
+      {streaming && scannedCalls > 0 && (
+        <div className="mt-3 px-1">
+          <div className="flex items-center justify-between text-[11px] text-ink-faint mb-1">
+            <span className="flex items-center gap-1.5">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-brand-500" />
+              </span>
+              Scanning calls for appointments…
+            </span>
+            <span>{scannedCalls}{totalCalls > 0 ? ` / ${totalCalls}` : ''} calls scanned</span>
+          </div>
+          <div className="h-1 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-1 rounded-full bg-brand-400 transition-all duration-500"
+              style={{ width: totalCalls > 0 ? `${Math.min((scannedCalls / totalCalls) * 100, 99)}%` : '40%' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {!streaming && scannedCalls > 0 && (
+        <p className="mt-3 text-center text-[11px] text-ink-faint">
+          Scanned {scannedCalls} calls · {items.length} appointment{items.length !== 1 ? 's' : ''} found
+        </p>
+      )}
     </div>
   );
 }
@@ -157,4 +196,3 @@ function SummaryTile({
     </button>
   );
 }
-

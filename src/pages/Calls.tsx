@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, useQuery } from '../lib/api';
-import type { CallDetail, CallList, CallRecording } from '../lib/types';
+import { api, useQuery, useStreamQuery } from '../lib/api';
+import type { CallDetail, CallRecording, CallSummary } from '../lib/types';
 import { PageHeader } from '../components/Shell';
 import { Card, DirectionPill, EmptyState, ErrorState, StatusBadge, Th, Td, TableSkeleton, cx } from '../components/ui';
 import { inr, duration, dateTime, phone, titleCase } from '../lib/format';
@@ -15,32 +15,32 @@ export default function Calls() {
     direction: params.get('direction') ?? '',
     phone: '',
   });
-  const [cursorStack, setCursorStack] = useState<Array<string | undefined>>([undefined]);
-  const [page, setPage] = useState(0);
   const [openId, setOpenId] = useState<string | null>(params.get('open'));
 
-  // Filter changes reset pagination.
-  useEffect(() => {
-    setCursorStack([undefined]);
-    setPage(0);
-  }, [filters.status, filters.direction, filters.phone]);
-
-  const { data, error, loading, initial, refresh } = useQuery<CallList>('/api/calls', {
-    limit: 20,
-    cursor: cursorStack[page],
+  // Filter changes reset stream.
+  const streamParams = useMemo(() => ({
     status: filters.status || undefined,
     direction: filters.direction || undefined,
     phone_number: filters.phone || undefined,
-  });
+    limit: 100,
+    max_pages: 20,
+  }), [filters.status, filters.direction, filters.phone]);
 
-  function goNext() {
-    if (!data?.next_cursor) return;
-    setCursorStack((s) => [...s.slice(0, page + 1), data.next_cursor!]);
-    setPage((p) => p + 1);
-  }
-  function goPrev() {
-    setPage((p) => Math.max(0, p - 1));
-  }
+  const { items: calls, meta, error, streaming, initial, refresh } = useStreamQuery<CallSummary>(
+    '/api/calls/stream',
+    streamParams,
+  );
+
+  // Client-side pagination over the streamed full list.
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(0);
+
+  // Reset page whenever filters change.
+  useEffect(() => { setPage(0); }, [filters.status, filters.direction, filters.phone]);
+
+  const pageSlice = useMemo(() => calls.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [calls, page]);
+  const totalPages = Math.ceil(calls.length / PAGE_SIZE);
+  const hasMore = streaming || calls.length > (page + 1) * PAGE_SIZE;
 
   function openCall(id: string) {
     setOpenId(id);
@@ -100,12 +100,23 @@ export default function Calls() {
             </button>
           )}
 
-          <span className="ml-auto text-xs text-ink-faint">{loading && !initial ? 'Refreshing…' : data ? `${data.data.length} shown` : ''}</span>
+          <span className="ml-auto flex items-center gap-2 text-xs text-ink-faint">
+            {streaming && (
+              <span className="flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
+                </span>
+                Loading…
+              </span>
+            )}
+            {calls.length > 0 && `${calls.length} total`}
+          </span>
         </div>
       </Card>
 
       <Card className="mt-4" bodyClassName="!px-0 !py-0">
-        {error && !data ? (
+        {error && !calls.length ? (
           <div className="p-4">
             <ErrorState message={error} onRetry={refresh} />
           </div>
@@ -113,7 +124,7 @@ export default function Calls() {
           <div className="p-4">
             <TableSkeleton rows={8} cols={6} />
           </div>
-        ) : !data?.data.length ? (
+        ) : !calls.length && !streaming ? (
           <EmptyState title="No calls match these filters" body="Try clearing a filter, or check back once more calls come in." />
         ) : (
           <>
@@ -131,7 +142,7 @@ export default function Calls() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.data.map((call, i) => (
+                  {pageSlice.map((call, i) => (
                     <tr
                       key={call.id}
                       onClick={() => openCall(call.id)}
@@ -151,17 +162,29 @@ export default function Calls() {
                       </Td>
                     </tr>
                   ))}
+                  {/* Shimmer row while streaming more calls */}
+                  {streaming && (
+                    <tr className="border-b border-line last:border-0">
+                      {Array.from({ length: 7 }).map((_, i) => (
+                        <td key={i} className="px-4 py-3">
+                          <div className="h-4 w-full animate-pulse rounded bg-slate-100" />
+                        </td>
+                      ))}
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
 
             <div className="flex items-center justify-between border-t border-line px-5 py-3">
-              <span className="text-xs text-ink-faint">Page {page + 1}</span>
+              <span className="text-xs text-ink-faint">
+                Page {page + 1}{totalPages > 1 ? ` of ${totalPages}` : ''}{streaming ? ' (loading more…)' : ''}
+              </span>
               <div className="flex gap-2">
-                <button className="btn-ghost !h-8 text-xs" onClick={goPrev} disabled={page === 0}>
+                <button className="btn-ghost !h-8 text-xs" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
                   Previous
                 </button>
-                <button className="btn-ghost !h-8 text-xs" onClick={goNext} disabled={!data.has_more}>
+                <button className="btn-ghost !h-8 text-xs" onClick={() => setPage((p) => p + 1)} disabled={!hasMore && page >= totalPages - 1}>
                   Next
                 </button>
               </div>
@@ -233,6 +256,7 @@ function CallDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 
             <div className="border-b border-line px-5 py-3">
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">Recording</p>
+              {/* Always try to fetch the recording — has_recording can lag */}
               <RecordingInline id={id} hasRecording={call.has_recording} />
             </div>
 
@@ -283,33 +307,31 @@ function TranscriptView({ call }: { call: CallDetail }) {
 
 /**
  * A play button that fetches the signed recording URL live (on demand,
- * rather than on drawer open) and swaps itself for an inline audio player —
- * sits right under Cost so playback never requires switching tabs.
+ * rather than on drawer open) and swaps itself for an inline audio player.
+ * Always tries to fetch the recording regardless of has_recording flag,
+ * since the flag can be stale (Sonex may have finished uploading since the
+ * call list was fetched).
  */
 function RecordingInline({ id, hasRecording }: { id: string; hasRecording: boolean }) {
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'empty'>('idle');
   const [recording, setRecording] = useState<CallRecording | null>(null);
   const [error, setError] = useState('');
 
-  if (!hasRecording) {
-    return <p className="text-xs text-ink-faint">No recording for this call.</p>;
-  }
-
   async function play() {
     setState('loading');
     setError('');
     try {
       const data = await api<CallRecording>(`/api/calls/${id}/recording`);
-      if (!data.url) {
+      if (!data?.url) {
         setState('empty');
-        setError(data._demo ? 'Recording preview unavailable in demo mode.' : 'No recording stored for this call.');
+        setError('Recording is not yet available. It may still be processing — try again in a moment.');
         return;
       }
       setRecording(data);
       setState('ready');
     } catch (err) {
       setState('empty');
-      setError((err as Error).message);
+      setError((err as Error).message || 'Could not load recording.');
     }
   }
 
@@ -324,18 +346,26 @@ function RecordingInline({ id, hasRecording }: { id: string; hasRecording: boole
 
   return (
     <div>
-      <button className="btn-ghost !h-8 gap-1.5 !px-3 text-xs" onClick={play} disabled={state === 'loading'}>
-        {state === 'loading' ? (
-          'Loading…'
-        ) : (
-          <>
-            <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
-              <path d="M3 2.2 10 6 3 9.8Z" fill="currentColor" />
-            </svg>
-            Play recording
-          </>
+      <div className="flex items-center gap-3">
+        <button className="btn-ghost !h-8 gap-1.5 !px-3 text-xs" onClick={play} disabled={state === 'loading'}>
+          {state === 'loading' ? (
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
+              Loading…
+            </span>
+          ) : (
+            <>
+              <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M3 2.2 10 6 3 9.8Z" fill="currentColor" />
+              </svg>
+              Play recording
+            </>
+          )}
+        </button>
+        {!hasRecording && state === 'idle' && (
+          <span className="text-[11px] text-amber-600">May not be available for this call</span>
         )}
-      </button>
+      </div>
       {state === 'empty' && <p className="mt-1.5 text-[11px] text-rose-600">{error}</p>}
     </div>
   );

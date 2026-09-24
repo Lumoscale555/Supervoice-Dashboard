@@ -53,9 +53,7 @@ never sent to a client's own session. See `server/pricing.js` and
   and access control is enforced by the Express session/admin middleware, not
   by Postgres row-level security.
 - **Local JSON file** (`server/data/tenants.json`) otherwise — zero setup.
-  Starts empty; optionally set `DEMO_SEED_USERNAME` / `DEMO_SEED_PASSWORD` in
-  `.env` to seed one demo client on first run (has no effect once Supabase is
-  configured). Good for development; switch to Supabase before deploying
+  Starts empty. Good for development; switch to Supabase before deploying
   anywhere with more than one machine, since the file store doesn't survive a
   redeploy or scale past one process.
 
@@ -80,11 +78,10 @@ Open http://localhost:5173 → redirects to `/login`.
   `ADMIN_PASSWORD` you set in `.env` — one login screen serves both roles, and
   the server routes you to `/admin` automatically. From there, **+ Add
   client** to create a real client: paste their Sonex API key, their
-  `agentId` (if they share an account with other clients), and set their
+  agent name (if they share an account with other clients), and set their
   billing rate and your provider cost.
-- **Client login:** whatever username/password the admin gave that client. If
-  you set `DEMO_SEED_USERNAME`/`DEMO_SEED_PASSWORD` in `.env` (file-store mode
-  only), that account also works and runs on demo data.
+- **Client login:** whatever username/password the admin gave that client.
+  A client with no Sonex API key sees no data.
 
 Production: `npm run build && npm start` serves the built SPA and the API
 from one Express process on `PORT` (default 8787).
@@ -123,8 +120,6 @@ an inline recording player, not raw tool calls.
 ```
 server/
   sonex.js            Real API client — auth, 5 req/s + 120 req/min pacing, 429 retry, response cache
-  mock.js             Deterministic demo-data client with the exact same interface
-  tenantClient.js      Wraps sonex.js/mock.js per tenant: forces agent_id, verifies call ownership
   pricing.js            Flat, pulse-billed rate — client rate and (admin-only) provider cost + margin
   billing.js             Aggregates a tenant's calls into day breakdowns using pricing.js
   appointments.js      Derives appointment rows from a tenant's calls' tool_calls

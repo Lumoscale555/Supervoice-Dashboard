@@ -35,25 +35,6 @@ for (const t of tenants) {
   if (!t.updatedAt) t.updatedAt = t.createdAt;
 }
 
-// No hardcoded demo credential is ever shipped in source. If you want a demo
-// client seeded on first run, set DEMO_SEED_USERNAME/DEMO_SEED_PASSWORD in
-// .env; otherwise the store starts empty and the first client comes from the
-// admin console (itself gated by ADMIN_USERNAME/ADMIN_PASSWORD in .env).
-if (tenants.length === 0 && process.env.DEMO_SEED_USERNAME && process.env.DEMO_SEED_PASSWORD) {
-  tenants.push({
-    id: crypto.randomUUID(),
-    name: 'Demo Client',
-    username: process.env.DEMO_SEED_USERNAME,
-    passwordHash: hashPassword(process.env.DEMO_SEED_PASSWORD),
-    sonexApiKey: '',
-    agentName: 'Demo Agent',
-    clientRateInrPerMin: 5,
-    providerCostInrPerMin: 2.5,
-    pulseSeconds: 30,
-    createdAt: new Date().toISOString(),
-  });
-  persist();
-}
 
 function toPublic(t) {
   const { passwordHash, sonexApiKey, ...rest } = t;

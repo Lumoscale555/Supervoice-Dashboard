@@ -52,7 +52,6 @@ export interface CallRecording {
   url: string | null;
   expires_at: string;
   duration_secs: number;
-  _demo?: boolean;
 }
 
 export interface BillingTotals {
@@ -166,7 +165,7 @@ export interface TenantPublic {
 
 export interface AuthMe {
   tenant: TenantPublic;
-  mode: 'demo' | 'live';
+  mode: 'no_key' | 'live';
   pricing: { rate_per_minute_inr: number; pulse_seconds: number };
 }
 
@@ -178,7 +177,7 @@ export interface BillingLineItem extends CallSummary {
 
 export interface AdminBilling {
   tenant: TenantPublic;
-  mode: 'demo' | 'live';
+  mode: 'no_key' | 'live';
   range: { from: string; to: string; days: number };
   summary: BillingSummary;
   line_items: BillingLineItem[];

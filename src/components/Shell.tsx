@@ -99,12 +99,12 @@ export function Shell({ children }: { children: ReactNode }) {
 }
 
 function ModeCard({ me }: { me: AuthMe | null }) {
-  const demo = me?.mode === 'demo';
+  const demo = me?.mode === 'no_key';
   return (
     <div className="rounded-xl bg-brand-50/60 p-3">
       <div className="flex items-center gap-2">
         <span className={cx('h-2 w-2 rounded-full', demo ? 'bg-amber-500' : 'bg-emerald-500')} />
-        <span className="text-xs font-semibold text-ink">{demo ? 'Demo data' : 'Live API'}</span>
+        <span className="text-xs font-semibold text-ink">{demo ? 'No API key' : 'Live API'}</span>
       </div>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-muted">
         {demo ? 'No Sonex API key set for this client yet — ask your admin.' : 'Connected to your Sonex account.'}

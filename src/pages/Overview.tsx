@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '../lib/api';
-import type { Overview as OverviewData, RangeKey } from '../lib/types';
+import { useStreamQuery } from '../lib/api';
+import type { BillingSummary, BillingTotals, Balance, CallSummary, RangeKey } from '../lib/types';
 import { PageHeader } from '../components/Shell';
 import { Card, ErrorState, Stat, StatusBadge, DirectionPill, TableSkeleton, Skeleton, EmptyState } from '../components/ui';
 import { CallVolumeChart, OutcomeBar, type VolumePoint } from '../components/charts';
@@ -55,19 +55,35 @@ function IconWallet() {
 
 export default function Overview() {
   const [range, setRange] = useState<RangeKey>('30d');
-  const { data, error, loading, initial, refresh } = useQuery<OverviewData>('/api/overview', { range });
+
+  // SSE stream: the server sends chunks with balance + recent_calls immediately,
+  // then partial summaries as call pages arrive, then the final with previous period.
+  const { items, meta, error, streaming, initial, refresh } = useStreamQuery(
+    '/api/overview/stream',
+    { range },
+  );
+
+  // Extract typed values from the merged meta object.
+  const data = meta as {
+    balance?: Balance;
+    recent_calls?: CallSummary[];
+    range?: { from: string; to: string; days: number; timezone: string };
+    summary?: BillingSummary | null;
+    previous?: BillingTotals | null;
+    streaming?: boolean;
+  };
 
   const volume: VolumePoint[] = useMemo(() => {
-    if (!data) return [];
+    if (!data?.summary) return [];
     return data.summary.by_day.map((row) => ({
       date: row.date,
       label: dayLabel(row.date),
       total: row.calls,
       connected: row.connected,
     }));
-  }, [data]);
+  }, [data?.summary]);
 
-  if (error && !data) {
+  if (error && !data?.summary && !data?.balance) {
     return (
       <div>
         <PageHeader title="Overview" description="Everything your voice agents did, at a glance." />
@@ -78,7 +94,7 @@ export default function Overview() {
     );
   }
 
-  const totals = data?.summary.totals;
+  const totals = data?.summary?.totals;
   const prev = data?.previous;
   const connectRate = totals && totals.calls ? totals.connected / totals.calls : null;
   const prevConnectRate = prev && prev.calls ? prev.connected / prev.calls : null;
@@ -92,6 +108,17 @@ export default function Overview() {
         onRangeChange={setRange}
       />
 
+      {/* Streaming indicator */}
+      {streaming && !initial && (
+        <div className="mb-4 flex items-center gap-2 text-xs text-ink-faint">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
+          </span>
+          Loading latest data…
+        </div>
+      )}
+
       {/* KPI row */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {initial ? (
@@ -103,7 +130,7 @@ export default function Overview() {
               label="Total calls"
               value={count(totals?.calls)}
               current={totals?.calls}
-              previous={prev?.calls}
+              previous={prev?.calls ?? undefined}
               icon={<IconPhone />}
               hint="vs. previous period"
             />
@@ -121,7 +148,7 @@ export default function Overview() {
               label="Total spend"
               value={inr(totals?.cost_inr)}
               current={totals?.cost_inr}
-              previous={prev?.cost_inr}
+              previous={prev?.cost_inr ?? undefined}
               invert
               icon={<IconRupee />}
               hint="Rs.5/min, billed per 30s"
@@ -129,16 +156,16 @@ export default function Overview() {
             <Stat
               index={3}
               label="Wallet balance"
-              value={inr(data?.balance.wallet.balance)}
+              value={inr(data?.balance?.wallet.balance)}
               icon={<IconWallet />}
-              hint={data?.balance.credits.length ? `${data.balance.credits.length} active credit grant${data.balance.credits.length > 1 ? 's' : ''}` : 'No active credits'}
+              hint={data?.balance?.credits.length ? `${data.balance.credits.length} active credit grant${data.balance.credits.length > 1 ? 's' : ''}` : 'No active credits'}
             />
           </>
         )}
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Card title="Call volume" subtitle={`${data?.range.days ?? 30}-day trend, daily`} className="xl:col-span-2">
+        <Card title="Call volume" subtitle={`${data?.range?.days ?? 30}-day trend, daily`} className="xl:col-span-2">
           {initial ? (
             <Skeleton className="h-[220px]" />
           ) : volume.length ? (
@@ -168,7 +195,7 @@ export default function Overview() {
             <div className="p-4">
               <TableSkeleton rows={6} cols={4} />
             </div>
-          ) : !data?.recent_calls.length ? (
+          ) : !data?.recent_calls?.length ? (
             <EmptyState title="No recent calls" body="Calls placed or received by your agents will appear here as they happen." />
           ) : (
             <ul className="divide-y divide-line">
@@ -201,8 +228,6 @@ export default function Overview() {
           )}
         </Card>
       </div>
-
-      {loading && !initial && <p className="mt-4 text-center text-[11px] text-ink-faint">Refreshing…</p>}
     </div>
   );
 }

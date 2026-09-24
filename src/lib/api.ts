@@ -76,3 +76,126 @@ export function useQuery<T>(path: string | null, params?: Record<string, unknown
 
   return { data, error, loading, initial: loading && data === null, refresh };
 }
+
+// ---------------------------------------------------------------------------
+// SSE streaming hook — calls a /stream endpoint and merges pages of data in
+// real-time, so the UI can show the first page in milliseconds while the
+// server is still fetching subsequent pages from Sonex.
+// ---------------------------------------------------------------------------
+
+export interface StreamState<T> {
+  /** All items accumulated so far across all streamed pages. */
+  items: T[];
+  /** Extra top-level fields from the last streamed chunk (totals, range, etc.). */
+  meta: Record<string, unknown>;
+  error: string | null;
+  /** True while the connection is open and no 'done' event has arrived. */
+  streaming: boolean;
+  /** True only before the very first chunk — use this to show a skeleton. */
+  initial: boolean;
+  refresh: () => void;
+}
+
+export function useStreamQuery<T>(
+  path: string | null,
+  params?: Record<string, unknown>,
+  /** Name of the array key inside each chunk (default: 'data'). */
+  itemsKey = 'data',
+): StreamState<T> {
+  const [items, setItems] = useState<T[]>([]);
+  const [meta, setMeta] = useState<Record<string, unknown>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(Boolean(path));
+  const [nonce, setNonce] = useState(0);
+  const hadFirst = useRef(false);
+  const [initial, setInitial] = useState(Boolean(path));
+
+  useEffect(() => {
+    if (!path) {
+      setItems([]);
+      setMeta({});
+      setStreaming(false);
+      setInitial(false);
+      return;
+    }
+    hadFirst.current = false;
+    setItems([]);
+    setMeta({});
+    setError(null);
+    setStreaming(true);
+    setInitial(true);
+
+    const url = new URL(path, window.location.origin);
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+    }
+
+    const ctrl = new AbortController();
+    let buffer = '';
+
+    fetch(url.toString(), { signal: ctrl.signal })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error?.message || `Request failed (${res.status})`);
+        }
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const raw of lines) {
+            const line = raw.trim();
+            if (!line.startsWith('data:')) continue;
+            const json = line.slice(5).trim();
+            if (!json) continue;
+            let evt: Record<string, unknown>;
+            try { evt = JSON.parse(json); } catch { continue; }
+
+            if (evt.event === 'done') {
+              setStreaming(false);
+              return;
+            }
+            if (evt.event === 'error') {
+              setError(String(evt.message || 'Stream error'));
+              setStreaming(false);
+              return;
+            }
+            // Regular data chunk
+            const chunk = evt.chunk as Record<string, unknown> | undefined;
+            if (!chunk) continue;
+            const newItems = (chunk[itemsKey] as T[] | undefined) ?? [];
+            if (!hadFirst.current) {
+              hadFirst.current = true;
+              setInitial(false);
+            }
+            setItems((prev) => [...prev, ...newItems]);
+            // Merge all non-items keys into meta
+            const { [itemsKey]: _omit, ...rest } = chunk;
+            setMeta((prev) => ({ ...prev, ...rest }));
+          }
+        }
+        setStreaming(false);
+      })
+      .catch((err: unknown) => {
+        if ((err as Error).name === 'AbortError') return;
+        setError((err as Error).message);
+        setStreaming(false);
+        setInitial(false);
+      });
+
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, JSON.stringify(params), itemsKey, nonce]);
+
+  const refresh = useCallback(() => {
+    setNonce((n) => n + 1);
+  }, []);
+
+  return { items, meta, error, streaming, initial, refresh };
+}

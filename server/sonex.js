@@ -13,9 +13,9 @@ class SonexError extends Error {
 }
 
 // The documented budget is 5 requests/second and 120/minute per tenant. We stay
-// under both by spacing requests ~220ms apart through a single queue, so a burst
+// under both by spacing requests ~180ms apart through a single queue, so a burst
 // of call-detail lookups can never trip a 429 on its own.
-function createLimiter({ minIntervalMs = 220, perMinute = 110 } = {}) {
+function createLimiter({ minIntervalMs = 180, perMinute = 110 } = {}) {
   let chain = Promise.resolve();
   let last = 0;
   let window = [];

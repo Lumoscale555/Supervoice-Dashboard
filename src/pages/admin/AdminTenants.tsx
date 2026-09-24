@@ -119,7 +119,7 @@ export default function AdminTenants() {
                           )}
                         >
                           <span className={cx('h-1.5 w-1.5 rounded-full', t.hasApiKey ? 'bg-emerald-500' : 'bg-amber-500')} />
-                          {t.hasApiKey ? 'Live' : 'Demo'}
+                          {t.hasApiKey ? 'Live' : 'No key'}
                         </span>
                       </Td>
                       <Td align="right">{inr(t.clientRateInrPerMin)}</Td>
@@ -317,9 +317,9 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
               )}
               <p className="mt-1 text-[11px] text-ink-faint">
                 {isNew
-                  ? 'Leave blank to run this client on demo data.'
+                  ? 'Required for this client to see any data.'
                   : editingKey && !tenant?.hasApiKey
-                    ? 'Leave blank to run this client on demo data.'
+                    ? 'Required for this client to see any data.'
                     : 'Paste the new key to replace the saved one.'}
               </p>
             </Field>

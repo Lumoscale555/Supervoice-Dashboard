@@ -8,25 +8,26 @@
 // rather than by an agent ID we cannot get from the UI.
 
 import { createSonexClient, SonexError } from './sonex.js';
-import { createMockClient } from './mock.js';
 
 const cache = new Map(); // tenantId -> { key, client }
+
+const hasUsableKey = (key) => Boolean(key) && !/^vsk_x+$/i.test(key);
 
 function baseClientFor(tenant) {
   const key = (tenant.sonexApiKey || '').trim();
   const cached = cache.get(tenant.id);
   if (cached && cached.key === key) return cached.client;
 
-  const usable = key && !/^vsk_x+$/i.test(key);
-  const client = usable ? createSonexClient({ apiKey: key }) : createMockClient();
+  if (!hasUsableKey(key)) {
+    throw new SonexError(400, { message: 'No Sonex API key is set for this client yet. Ask your admin to add one.' });
+  }
+  const client = createSonexClient({ apiKey: key });
   cache.set(tenant.id, { key, client });
   return client;
 }
 
-/** True once a tenant has something real to call — a key, or demo mode. */
 export function tenantMode(tenant) {
-  const key = (tenant.sonexApiKey || '').trim();
-  return key && !/^vsk_x+$/i.test(key) ? 'live' : 'demo';
+  return hasUsableKey((tenant.sonexApiKey || '').trim()) ? 'live' : 'no_key';
 }
 
 export function clearTenantClientCache(tenantId) {
