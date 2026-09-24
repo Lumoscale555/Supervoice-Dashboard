@@ -143,6 +143,7 @@ export interface Billing {
   pricing: { rate_per_minute_inr: number };
   balance: Balance;
   summary: BillingSummary;
+  line_items: Array<Pick<CallSummary, 'id' | 'started_at' | 'agent' | 'direction' | 'from' | 'to' | 'status' | 'duration_secs' | 'cost_inr'>>;
 }
 
 export type RangeKey = 'today' | '7d' | '30d' | '90d';

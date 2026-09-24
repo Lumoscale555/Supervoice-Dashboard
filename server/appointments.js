@@ -117,20 +117,22 @@ export function appointmentsFromCall(call, toolMap = DEFAULT_TOOL_MAP) {
  * call details one by one. The client's rate limiter paces those requests, and
  * `scanLimit` bounds how far back a single refresh reaches.
  */
-export async function collectAppointments(client, { toolMap = DEFAULT_TOOL_MAP, scanLimit = 60, ...params } = {}) {
-  const calls = await client.listAllCalls(params, { maxPages: Math.ceil(scanLimit / 100) || 1 });
-  const candidates = calls.slice(0, scanLimit);
+export async function collectAppointments(client, { toolMap = DEFAULT_TOOL_MAP, scanLimit = 60, calls, ...params } = {}) {
+  const all = calls ?? (await client.listAllCalls(params, { maxPages: Math.ceil(scanLimit / 100) || 1 }));
+  // Only a call that actually connected can have run a booking tool.
+  const eligible = all.filter(isScannable);
+  const candidates = eligible.slice(0, scanLimit);
 
   const appointments = [];
   const failures = [];
 
-  for (const summary of candidates) {
-    try {
-      const detail = await client.getCall(summary.id, 'tool_calls');
-      appointments.push(...appointmentsFromCall({ ...summary, ...detail }, toolMap));
-    } catch (err) {
-      failures.push({ call_id: summary.id, message: err.message });
-    }
+  for (let i = 0; i < candidates.length; i += 8) {
+    const batch = candidates.slice(i, i + 8);
+    const settled = await Promise.allSettled(batch.map((s) => client.getCall(s.id, 'tool_calls')));
+    settled.forEach((r, j) => {
+      if (r.status === 'fulfilled') appointments.push(...appointmentsFromCall({ ...batch[j], ...r.value }, toolMap));
+      else failures.push({ call_id: batch[j].id, message: r.reason?.message || 'Error' });
+    });
   }
 
   appointments.sort((a, b) => new Date(b.booked_at || 0) - new Date(a.booked_at || 0));
@@ -138,8 +140,10 @@ export async function collectAppointments(client, { toolMap = DEFAULT_TOOL_MAP, 
   return {
     data: appointments,
     scanned_calls: candidates.length,
-    total_calls_in_window: calls.length,
-    truncated: calls.length > candidates.length,
+    total_calls_in_window: all.length,
+    truncated: eligible.length > candidates.length,
     failures,
   };
 }
+
+export const isScannable = (call) => call.status === 'completed' && call.duration_secs > 0;

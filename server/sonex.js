@@ -65,6 +65,8 @@ export function createSonexClient({ apiKey, cacheTtlMs = 90_000 }) {
   const limit = createLimiter();
   const cache = createCache(cacheTtlMs);
   const inflight = new Map();
+  // A completed call never changes, so its detail is kept for good (bounded).
+  const finished = new Map();
 
   // noCache=true skips both the read and write of the cache.
   // Use for signed URLs (recordings) and any response that must always be fresh.
@@ -74,6 +76,8 @@ export function createSonexClient({ apiKey, cacheTtlMs = 90_000 }) {
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
     }
     const key = url.toString();
+
+    if (finished.has(key)) return finished.get(key);
 
     if (!noCache) {
       const cached = cache.get(key);
@@ -116,6 +120,10 @@ export function createSonexClient({ apiKey, cacheTtlMs = 90_000 }) {
     // Only cache if noCache is false AND the response looks complete.
     // Never cache a recording response with url=null (it may be processing).
     if (!noCache) cache.set(key, body);
+    if (body?.status === 'completed' && /^\/v1\/calls\/[^/]+$/.test(path)) {
+      finished.set(key, body);
+      if (finished.size > 5000) finished.delete(finished.keys().next().value);
+    }
     return body;
   }
 

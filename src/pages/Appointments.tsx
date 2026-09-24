@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStreamQuery } from '../lib/api';
 import type { Appointment, RangeKey } from '../lib/types';
 import { PageHeader } from '../components/Shell';
@@ -16,7 +16,7 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function Appointments() {
-  const [range, setRange] = useState<RangeKey>('30d');
+  const [range, setRange] = useState<RangeKey>('today');
   const [kindFilter, setKindFilter] = useState<string>('');
 
   const { items, meta, error, streaming, initial, refresh } = useStreamQuery<Appointment>(
@@ -27,6 +27,12 @@ export default function Appointments() {
   const rows = useMemo(() => {
     return kindFilter ? items.filter((a) => a.status === kindFilter) : items;
   }, [items, kindFilter]);
+
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [range, kindFilter]);
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const pageRows = useMemo(() => rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [rows, page]);
 
   const summary = useMemo(() => ({
     booked: items.filter((a) => a.status === 'booked').length,
@@ -89,7 +95,7 @@ export default function Appointments() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((appt, i) => (
+                {pageRows.map((appt, i) => (
                   <tr
                     key={appt.id}
                     className="animate-fade-up border-b border-line transition-colors duration-150 last:border-0 hover:bg-brand-50/40"
@@ -127,6 +133,19 @@ export default function Appointments() {
                 )}
               </tbody>
             </table>
+            <div className="flex items-center justify-between border-t border-line px-5 py-3">
+              <span className="text-xs text-ink-faint">
+                Page {page + 1} of {totalPages}{streaming ? ' (loading more…)' : ''}
+              </span>
+              <div className="flex gap-2">
+                <button className="btn-ghost !h-8 text-xs" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+                  Previous
+                </button>
+                <button className="btn-ghost !h-8 text-xs" onClick={() => setPage((p) => p + 1)} disabled={page >= totalPages - 1}>
+                  Next
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </Card>

@@ -1,14 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '../lib/api';
 import type { Billing as BillingData, RangeKey } from '../lib/types';
 import { PageHeader } from '../components/Shell';
-import { Card, EmptyState, ErrorState, Skeleton } from '../components/ui';
+import { Card, DirectionPill, EmptyState, ErrorState, Skeleton, StatusBadge, Th, Td } from '../components/ui';
 import { SpendChart, type SpendPoint } from '../components/charts';
-import { inr, count, dayLabel, duration } from '../lib/format';
+import { inr, count, dayLabel, duration, dateTime, phone } from '../lib/format';
 
 export default function Billing() {
-  const [range, setRange] = useState<RangeKey>('30d');
+  const [range, setRange] = useState<RangeKey>('today');
   const { data, error, loading, initial, refresh } = useQuery<BillingData>('/api/billing', { range });
+
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [range]);
+  const items = data?.line_items ?? [];
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const pageItems = items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const spendSeries: SpendPoint[] = useMemo(() => {
     if (!data) return [];
@@ -77,6 +84,60 @@ export default function Billing() {
           <SpendChart data={spendSeries} />
         ) : (
           <EmptyState title="No spend recorded" body="Costs will appear here once your agents start handling calls." />
+        )}
+      </Card>
+
+      <Card title="Billing history" subtitle="Every call and what it cost" className="mt-6" bodyClassName="!px-0 !py-0">
+        {initial ? (
+          <div className="p-4"><Skeleton className="h-40" /></div>
+        ) : !items.length ? (
+          <EmptyState title="No calls in this period" body="Each call and its price will be listed here." />
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <Th>Started</Th>
+                    <Th>Agent</Th>
+                    <Th>Direction</Th>
+                    <Th>From / To</Th>
+                    <Th>Status</Th>
+                    <Th align="right">Duration</Th>
+                    <Th align="right">Rate</Th>
+                    <Th align="right">Cost</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageItems.map((c) => (
+                    <tr key={c.id} className="border-b border-line last:border-0 hover:bg-brand-50/40">
+                      <Td className="text-ink-muted">{dateTime(c.started_at)}</Td>
+                      <Td className="font-medium">{c.agent?.name ?? 'Unknown'}</Td>
+                      <Td><DirectionPill direction={c.direction} /></Td>
+                      <Td className="text-ink-muted">{phone(c.direction === 'inbound' ? c.from : c.to)}</Td>
+                      <Td><StatusBadge status={c.status} /></Td>
+                      <Td align="right">{duration(c.duration_secs)}</Td>
+                      <Td align="right" className="text-ink-muted">₹{rate}/min</Td>
+                      <Td align="right" className="font-medium">{inr(c.cost_inr)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-line px-5 py-3">
+              <span className="text-xs text-ink-faint">
+                Page {page + 1} of {totalPages} · {items.length} calls
+              </span>
+              <div className="flex gap-2">
+                <button className="btn-ghost !h-8 text-xs" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+                  Previous
+                </button>
+                <button className="btn-ghost !h-8 text-xs" onClick={() => setPage((p) => p + 1)} disabled={page >= totalPages - 1}>
+                  Next
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </Card>
 

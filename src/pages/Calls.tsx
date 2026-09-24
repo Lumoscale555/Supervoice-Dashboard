@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, useQuery, useStreamQuery } from '../lib/api';
-import type { CallDetail, CallRecording, CallSummary } from '../lib/types';
+import type { CallDetail, CallRecording, CallSummary, RangeKey } from '../lib/types';
 import { PageHeader } from '../components/Shell';
 import { Card, DirectionPill, EmptyState, ErrorState, StatusBadge, Th, Td, TableSkeleton, cx } from '../components/ui';
 import { inr, duration, dateTime, phone, titleCase } from '../lib/format';
@@ -15,6 +15,7 @@ export default function Calls() {
     direction: params.get('direction') ?? '',
     phone: '',
   });
+  const [range, setRange] = useState<RangeKey>('today');
   const [openId, setOpenId] = useState<string | null>(params.get('open'));
 
   // Filter changes reset stream.
@@ -22,9 +23,8 @@ export default function Calls() {
     status: filters.status || undefined,
     direction: filters.direction || undefined,
     phone_number: filters.phone || undefined,
-    limit: 100,
-    max_pages: 20,
-  }), [filters.status, filters.direction, filters.phone]);
+    range,
+  }), [filters.status, filters.direction, filters.phone, range]);
 
   const { items: calls, meta, error, streaming, initial, refresh } = useStreamQuery<CallSummary>(
     '/api/calls/stream',
@@ -32,11 +32,11 @@ export default function Calls() {
   );
 
   // Client-side pagination over the streamed full list.
-  const PAGE_SIZE = 20;
+  const PAGE_SIZE = 10;
   const [page, setPage] = useState(0);
 
   // Reset page whenever filters change.
-  useEffect(() => { setPage(0); }, [filters.status, filters.direction, filters.phone]);
+  useEffect(() => { setPage(0); }, [filters.status, filters.direction, filters.phone, range]);
 
   const pageSlice = useMemo(() => calls.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [calls, page]);
   const totalPages = Math.ceil(calls.length / PAGE_SIZE);
@@ -57,7 +57,7 @@ export default function Calls() {
 
   return (
     <div>
-      <PageHeader title="Calls" description="Every call your agents have handled, searchable and filterable." />
+      <PageHeader title="Calls" description="Every call your agents have handled, searchable and filterable." range={range} onRangeChange={setRange} />
 
       <Card bodyClassName="!p-4">
         <div className="flex flex-wrap items-center gap-3">

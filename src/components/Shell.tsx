@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useSession } from '../lib/session';
 import type { AuthMe } from '../lib/types';
-import { cx, Segmented } from './ui';
+import { cx } from './ui';
 import type { RangeKey } from '../lib/types';
 
 const NAV = [
@@ -188,17 +188,17 @@ export function PageHeader({
       <div className="flex items-center gap-2">
         {actions}
         {range && onRangeChange && (
-          <Segmented
-            label="Time range"
+          <select
+            className="field !h-9 w-auto"
+            aria-label="Time range"
             value={range}
-            onChange={onRangeChange}
-            options={[
-              { value: 'today', label: 'Today' },
-              { value: '7d', label: 'Week' },
-              { value: '30d', label: 'Month' },
-              { value: '90d', label: '90 days' },
-            ]}
-          />
+            onChange={(e) => onRangeChange(e.target.value as RangeKey)}
+          >
+            <option value="today">Today</option>
+            <option value="7d">Week</option>
+            <option value="30d">Month</option>
+            <option value="90d">90 days</option>
+          </select>
         )}
       </div>
     </div>

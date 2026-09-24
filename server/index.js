@@ -17,7 +17,8 @@ import compression from 'compression';
 import cors from 'cors';
 import 'dotenv/config';
 
-import { collectAppointments, appointmentsFromCall, DEFAULT_TOOL_MAP } from './appointments.js';
+import { collectAppointments, appointmentsFromCall, isScannable, DEFAULT_TOOL_MAP } from './appointments.js';
+import { getCalls, clearMirror, startMirrorWarmer } from './mirror.js';
 import { priceCall, priceCallWithMargin } from './pricing.js';
 import { buildBillingSummary } from './billing.js';
 import { getScopedClient, tenantMode, clearTenantClientCache } from './tenantClient.js';
@@ -88,11 +89,44 @@ const daysAgo = (n) => new Date(Date.now() - n * 86400000);
 const isoDate = (d) => d.toISOString().slice(0, 10);
 
 function resolveRange(query) {
-  const days = { today: 1, '7d': 7, '30d': 30, '90d': 90 }[query.range] || 30;
+  const days = { today: 1, '7d': 7, '30d': 30, '90d': 90 }[query.range] || 1;
   return {
     days,
     from: query.from || isoDate(daysAgo(days - 1)),
     to: query.to || isoDate(new Date()),
+  };
+}
+
+const windowISO = (from, to) => ({
+  from: new Date(from + 'T00:00:00Z').toISOString(),
+  to: new Date(to + 'T23:59:59Z').toISOString(),
+});
+const inWindow = (calls, w) =>
+  calls.filter((c) => {
+    const t = Date.parse(c.started_at);
+    return t >= Date.parse(w.from) && t <= Date.parse(w.to);
+  });
+
+/** Overview payload: current period + previous period from ONE mirror read. */
+async function overviewPayload(req) {
+  const { days, from, to } = resolveRange(req.query);
+  const prevTo = new Date(new Date(from).getTime() - 86400000);
+  const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
+  const cur = windowISO(from, to);
+  const prev = windowISO(isoDate(prevFrom), isoDate(prevTo));
+
+  const [all, balance] = await Promise.all([
+    getCalls(req.tenant, req.client, { from: prev.from, to: cur.to }),
+    req.client.getBalance(),
+  ]);
+  const calls = inWindow(all, cur);
+
+  return {
+    range: { from, to, days, timezone: TIMEZONE },
+    summary: buildBillingSummary(calls, req.tenant),
+    previous: buildBillingSummary(inWindow(all, prev), req.tenant).totals,
+    balance,
+    recent_calls: all.slice(0, 8).map((c) => priceCall(c, req.tenant)),
   };
 }
 
@@ -208,97 +242,65 @@ app.get(
   '/api/overview',
   requireClient,
   loadTenant,
-  route(async (req) => {
-    const { days, from, to } = resolveRange(req.query);
-    const tz = TIMEZONE;
-
-    const prevTo = new Date(new Date(from).getTime() - 86400000);
-    const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
-
-    const [calls, balance, recent, prevCalls] = await Promise.all([
-      req.client.listAllCalls({
-        started_after: new Date(from + 'T00:00:00Z').toISOString(),
-        started_before: new Date(to + 'T23:59:59Z').toISOString(),
-      }),
-      req.client.getBalance(),
-      req.client.listCalls({ limit: 8 }),
-      req.client.listAllCalls({
-        started_after: new Date(prevFrom.toISOString().slice(0, 10) + 'T00:00:00Z').toISOString(),
-        started_before: new Date(prevTo.toISOString().slice(0, 10) + 'T23:59:59Z').toISOString(),
-      }),
-    ]);
-
-    const summary = buildBillingSummary(calls, req.tenant);
-    const previous = buildBillingSummary(prevCalls, req.tenant).totals;
-
-    return {
-      range: { from, to, days, timezone: tz },
-      summary,
-      previous,
-      balance,
-      recent_calls: recent.data.map((c) => priceCall(c, req.tenant)),
-    };
-  }),
+  route((req) => overviewPayload(req)),
 );
 
 // --- Calls ----------------------------------------------------------------
-app.get(
-  '/api/calls',
-  requireClient,
-  loadTenant,
-  route(async (req) => {
-    const { limit, cursor, status, direction, phone_number, started_after, started_before } = req.query;
-    const result = await req.client.listCalls({
-      limit: limit || 25,
-      cursor,
-      status,
-      direction,
-      phone_number,
-      started_after,
-      started_before,
-    });
-    return { ...result, data: result.data.map((c) => priceCall(c, req.tenant)) };
-  }),
-);
+// Calls list, served from the in-memory mirror. Opaque cursor = page offset.
+async function filteredCalls(req) {
+  const { status, direction, phone_number, started_after, started_before, range } = req.query;
+  let from;
+  let to;
+  if (range || !started_after) {
+    ({ from, to } = windowISO(...Object.values(resolveRange(req.query)).slice(1)));
+  } else {
+    from = started_after;
+    to = started_before || new Date().toISOString();
+  }
+  const digits = String(phone_number || '').replace(/\D/g, '');
 
-// ---------------------------------------------------------------------------
-// SSE: stream call list pages as they arrive from Sonex
-// IMPORTANT: must be registered BEFORE /api/calls/:id so Express does not
-// treat the literal word 'stream' as a call ID.
-// ---------------------------------------------------------------------------
+  let rows = await getCalls(req.tenant, req.client, { from, to });
+  if (status) rows = rows.filter((c) => c.status === status);
+  if (direction) rows = rows.filter((c) => c.direction === direction);
+  if (digits) rows = rows.filter((c) => `${c.from || ''}${c.to || ''}`.replace(/\D/g, '').includes(digits));
+  return rows;
+}
+
+async function mirrorPage(req) {
+  const rows = await filteredCalls(req);
+  const size = Math.min(Number(req.query.limit) || 10, 100);
+  const offset = Number(req.query.cursor) || 0;
+  const has_more = offset + size < rows.length;
+  return {
+    data: rows.slice(offset, offset + size).map((c) => priceCall(c, req.tenant)),
+    has_more,
+    next_cursor: has_more ? String(offset + size) : null,
+  };
+}
+
+app.get('/api/calls', requireClient, loadTenant, route(mirrorPage));
+
+// SSE: the first 10 rows go out immediately so page 1 paints at once; the rest
+// follow in the background in chunks of 50 while the user is already reading.
 app.get(
   '/api/calls/stream',
   requireClient,
   loadTenant,
   sseRoute(async (req, sse) => {
-    const { status, direction, phone_number, started_after, started_before, limit = 25, max_pages = 20 } = req.query;
-    const base = req.client;
-    let cursor;
-    let page = 0;
-    const maxPages = Math.min(Number(max_pages), 20);
-
-    while (page < maxPages) {
-      const res = await base.listCalls({
-        limit: Math.min(Number(limit), 100),
-        cursor,
-        status: status || undefined,
-        direction: direction || undefined,
-        phone_number: phone_number || undefined,
-        started_after: started_after || undefined,
-        started_before: started_before || undefined,
-      });
-
-      const priced = (res.data || []).map((c) => priceCall(c, req.tenant));
+    const rows = await filteredCalls(req);
+    const FIRST = 10;
+    const CHUNK = 50;
+    const send = (slice, offset) =>
       sse.send({
-        data: priced,
-        has_more: Boolean(res.has_more),
-        next_cursor: res.next_cursor ?? null,
-        page,
+        data: slice.map((c) => priceCall(c, req.tenant)),
+        has_more: offset + slice.length < rows.length,
+        total: rows.length,
       });
 
-      if (!res.has_more || !res.next_cursor) break;
-      cursor = res.next_cursor;
-      page += 1;
+    send(rows.slice(0, FIRST), 0);
+    for (let i = FIRST; i < rows.length; i += CHUNK) {
+      await new Promise((r) => setImmediate(r));
+      send(rows.slice(i, i + CHUNK), i);
     }
     sse.done();
   }),
@@ -362,22 +364,20 @@ app.get(
   route(async (req) => {
     const { from, to } = resolveRange(req.query);
     const toolMap = req.query.tools ? JSON.parse(req.query.tools) : DEFAULT_TOOL_MAP;
+    const calls = await getCalls(req.tenant, req.client, windowISO(from, to));
 
     const result = await collectAppointments(req.client, {
       toolMap,
       scanLimit: Math.min(Number(req.query.scan_limit) || 60, 200),
-      started_after: new Date(from + 'T00:00:00Z').toISOString(),
-      started_before: new Date(to + 'T23:59:59Z').toISOString(),
+      calls,
     });
 
     return { ...result, range: { from, to }, tool_map: toolMap };
   }),
 );
 
-// ---------------------------------------------------------------------------
-// SSE: stream appointments as tool-call details are fetched.
-// Emits appointments in batches as parallel detail fetches resolve.
-// ---------------------------------------------------------------------------
+// SSE: stream appointments as tool-call details are fetched. Completed-call
+// details are cached for good, so only never-seen calls cost an upstream request.
 app.get(
   '/api/appointments/stream',
   requireClient,
@@ -386,62 +386,31 @@ app.get(
     const { from, to } = resolveRange(req.query);
     const toolMap = req.query.tools ? JSON.parse(req.query.tools) : DEFAULT_TOOL_MAP;
     const scanLimit = Math.min(Number(req.query.scan_limit) || 80, 200);
-    const BATCH = 8; // parallel getCall requests per batch
+    const BATCH = 8;
 
-    // First emit the range meta immediately so the frontend knows the window.
-    sse.send({ data: [], range: { from, to }, scanned_calls: 0, total_calls_in_window: 0, truncated: false, failures: [], streaming: true });
+    const calls = await getCalls(req.tenant, req.client, windowISO(from, to));
+    const eligible = calls.filter(isScannable);
+    const candidates = eligible.slice(0, scanLimit);
+    const meta = { total_calls_in_window: calls.length, truncated: eligible.length > candidates.length, range: { from, to } };
 
-    const calls = await req.client.listAllCalls({
-      started_after: new Date(from + 'T00:00:00Z').toISOString(),
-      started_before: new Date(to + 'T23:59:59Z').toISOString(),
-    }, { maxPages: Math.ceil(scanLimit / 100) || 1 });
-
-    const candidates = calls.slice(0, scanLimit);
     let scanned = 0;
     const failures = [];
-    const allAppointments = [];
 
     for (let i = 0; i < candidates.length; i += BATCH) {
       const batch = candidates.slice(i, i + BATCH);
-      const settled = await Promise.allSettled(
-        batch.map((s) => req.client.getCall(s.id, 'tool_calls'))
-      );
+      const settled = await Promise.allSettled(batch.map((s) => req.client.getCall(s.id, 'tool_calls')));
 
-      const batchAppointments = [];
-      for (let j = 0; j < settled.length; j++) {
-        const result = settled[j];
+      const found = [];
+      settled.forEach((r, j) => {
         scanned += 1;
-        if (result.status === 'fulfilled') {
-          const appts = appointmentsFromCall({ ...batch[j], ...result.value }, toolMap);
-          batchAppointments.push(...appts);
-          allAppointments.push(...appts);
-        } else {
-          failures.push({ call_id: batch[j].id, message: result.reason?.message || 'Error' });
-        }
-      }
+        if (r.status === 'fulfilled') found.push(...appointmentsFromCall({ ...batch[j], ...r.value }, toolMap));
+        else failures.push({ call_id: batch[j].id, message: r.reason?.message || 'Error' });
+      });
 
-      if (batchAppointments.length > 0) {
-        sse.send({
-          data: batchAppointments,
-          scanned_calls: scanned,
-          total_calls_in_window: calls.length,
-          truncated: calls.length > candidates.length,
-          failures: [],
-          range: { from, to },
-          streaming: true,
-        });
-      }
+      if (found.length > 0) sse.send({ data: found, scanned_calls: scanned, failures: [], streaming: true, ...meta });
     }
 
-    sse.send({
-      data: [],
-      scanned_calls: scanned,
-      total_calls_in_window: calls.length,
-      truncated: calls.length > candidates.length,
-      failures,
-      range: { from, to },
-      streaming: false,
-    });
+    sse.send({ data: [], scanned_calls: scanned, failures, streaming: false, ...meta });
     sse.done();
   }),
 );
@@ -455,20 +424,20 @@ app.get(
     const { days, from, to } = resolveRange(req.query);
 
     const [calls, balance] = await Promise.all([
-      req.client.listAllCalls({
-        started_after: new Date(from + 'T00:00:00Z').toISOString(),
-        started_before: new Date(to + 'T23:59:59Z').toISOString(),
-      }),
+      getCalls(req.tenant, req.client, windowISO(from, to)),
       req.client.getBalance(),
     ]);
-
-    const summary = buildBillingSummary(calls, req.tenant);
 
     return {
       range: { from, to, days, timezone: TIMEZONE },
       pricing: { rate_per_minute_inr: req.tenant.clientRateInrPerMin },
       balance,
-      summary,
+      summary: buildBillingSummary(calls, req.tenant),
+      // Per-call history (client rate only — never provider cost or margin).
+      line_items: calls.map((c) => {
+        const { id, started_at, agent, direction, from: caller, to: callee, status, duration_secs, cost_inr } = priceCall(c, req.tenant);
+        return { id, started_at, agent, direction, from: caller, to: callee, status, duration_secs, cost_inr };
+      }),
     };
   }),
 );
@@ -481,75 +450,7 @@ app.get(
   requireClient,
   loadTenant,
   sseRoute(async (req, sse) => {
-    const { days, from, to } = resolveRange(req.query);
-    const tz = TIMEZONE;
-
-    // Step 1: balance + recent calls are very fast (2 requests).
-    const [balance, recent] = await Promise.all([
-      req.client.getBalance(),
-      req.client.listCalls({ limit: 8 }),
-    ]);
-    sse.send({
-      data: [],
-      balance,
-      recent_calls: recent.data.map((c) => priceCall(c, req.tenant)),
-      range: { from, to, days, timezone: tz },
-      summary: null,
-      previous: null,
-      streaming: true,
-    });
-
-    // Step 2: paginate current-period calls and stream partial summaries.
-    let allCalls = [];
-    let cursor;
-    let page = 0;
-    const maxPages = 20;
-    while (page < maxPages) {
-      const res = await req.client.listCalls({
-        limit: 100,
-        cursor,
-        started_after: new Date(from + 'T00:00:00Z').toISOString(),
-        started_before: new Date(to + 'T23:59:59Z').toISOString(),
-      });
-      const filtered = (res.data || []);
-      allCalls = allCalls.concat(filtered);
-
-      // Emit a partial summary so the UI can update immediately.
-      const partialSummary = buildBillingSummary(allCalls, req.tenant);
-      sse.send({
-        data: [],
-        balance,
-        recent_calls: recent.data.map((c) => priceCall(c, req.tenant)),
-        range: { from, to, days, timezone: tz },
-        summary: partialSummary,
-        previous: null,
-        streaming: true,
-      });
-
-      if (!res.has_more || !res.next_cursor) break;
-      cursor = res.next_cursor;
-      page += 1;
-    }
-
-    // Step 3: fetch previous period for delta comparison.
-    const prevTo = new Date(new Date(from).getTime() - 86400000);
-    const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
-    const prevCalls = await req.client.listAllCalls({
-      started_after: new Date(prevFrom.toISOString().slice(0, 10) + 'T00:00:00Z').toISOString(),
-      started_before: new Date(prevTo.toISOString().slice(0, 10) + 'T23:59:59Z').toISOString(),
-    });
-    const previous = buildBillingSummary(prevCalls, req.tenant).totals;
-    const summary = buildBillingSummary(allCalls, req.tenant);
-
-    sse.send({
-      data: [],
-      balance,
-      recent_calls: recent.data.map((c) => priceCall(c, req.tenant)),
-      range: { from, to, days, timezone: tz },
-      summary,
-      previous,
-      streaming: false,
-    });
+    sse.send({ ...(await overviewPayload(req)), data: [], streaming: false });
     sse.done();
   }),
 );
@@ -578,6 +479,7 @@ app.patch(
     const updated = await store.updateTenant(req.params.id, req.body || {});
     if (!updated) throw Object.assign(new Error('Tenant not found.'), { status: 404 });
     clearTenantClientCache(req.params.id);
+    clearMirror(req.params.id);
     return { data: updated };
   }),
 );
@@ -588,6 +490,7 @@ app.delete(
   route(async (req) => {
     const ok = await store.deleteTenant(req.params.id);
     clearTenantClientCache(req.params.id);
+    clearMirror(req.params.id);
     if (!ok) throw Object.assign(new Error('Tenant not found.'), { status: 404 });
     return { ok: true };
   }),
@@ -605,10 +508,7 @@ app.get(
 
     const { days, from, to } = resolveRange(req.query);
     const client = getScopedClient(tenant);
-    const calls = await client.listAllCalls({
-      started_after: new Date(from + 'T00:00:00Z').toISOString(),
-      started_before: new Date(to + 'T23:59:59Z').toISOString(),
-    });
+    const calls = await getCalls(tenant, client, windowISO(from, to));
     const summary = buildBillingSummary(calls, tenant, { withMargin: true });
 
     // Every call, priced with margin — this is the only place client rate,
@@ -645,6 +545,10 @@ if (fs.existsSync(dist)) {
 // Only start a real listening server when run directly (`node server/index.js`
 // / `npm start`, for self-hosting or local dev).
 if (!process.env.VERCEL) {
+  startMirrorWarmer(async (tenantId) => {
+    const t = await store.getTenantRaw(tenantId);
+    return t ? getScopedClient(t) : null;
+  });
   app.listen(PORT, async () => {
     console.log(`\n  Super Voice API  ->  http://localhost:${PORT}`);
     console.log(`  Tenant store: ${store.backend === 'supabase' ? 'Supabase' : 'local file (server/data/tenants.json)'}`);

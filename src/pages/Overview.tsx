@@ -54,7 +54,7 @@ function IconWallet() {
 }
 
 export default function Overview() {
-  const [range, setRange] = useState<RangeKey>('30d');
+  const [range, setRange] = useState<RangeKey>('today');
 
   // SSE stream: the server sends chunks with balance + recent_calls immediately,
   // then partial summaries as call pages arrive, then the final with previous period.
