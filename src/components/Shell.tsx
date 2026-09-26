@@ -3,7 +3,6 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useSession } from '../lib/session';
 import type { AuthMe } from '../lib/types';
 import { cx } from './ui';
-import type { RangeKey } from '../lib/types';
 
 const NAV = [
   { to: '/', label: 'Overview', end: true, icon: IconGrid },
@@ -169,14 +168,10 @@ function PageTitle() {
 export function PageHeader({
   title,
   description,
-  range,
-  onRangeChange,
   actions,
 }: {
   title: string;
   description?: string;
-  range?: RangeKey;
-  onRangeChange?: (r: RangeKey) => void;
   actions?: ReactNode;
 }) {
   return (
@@ -187,18 +182,6 @@ export function PageHeader({
       </div>
       <div className="flex items-center gap-2">
         {actions}
-        {range && onRangeChange && (
-          <select
-            className="field !h-9 w-auto"
-            aria-label="Time range"
-            value={range}
-            onChange={(e) => onRangeChange(e.target.value as RangeKey)}
-          >
-            <option value="today">Today</option>
-            <option value="7d">Week</option>
-            <option value="30d">Month</option>
-          </select>
-        )}
       </div>
     </div>
   );

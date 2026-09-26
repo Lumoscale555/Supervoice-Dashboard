@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStreamQuery } from '../lib/api';
-import type { Appointment, RangeKey } from '../lib/types';
+import type { Appointment } from '../lib/types';
 import { PageHeader } from '../components/Shell';
 import { Card, EmptyState, ErrorState, Skeleton, TableSkeleton, Th, Td, cx } from '../components/ui';
 import { dateTime, phone, titleCase } from '../lib/format';
@@ -16,12 +16,11 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function Appointments() {
-  const [range, setRange] = useState<RangeKey>('today');
   const [kindFilter, setKindFilter] = useState<string>('');
 
   const { items, meta, error, streaming, initial, refresh } = useStreamQuery<Appointment>(
     '/api/appointments/stream',
-    { range, scan_limit: 200 },
+    { scan_limit: 200 },
   );
 
   const rows = useMemo(() => {
@@ -30,7 +29,7 @@ export default function Appointments() {
 
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(0);
-  useEffect(() => { setPage(0); }, [range, kindFilter]);
+  useEffect(() => { setPage(0); }, [kindFilter]);
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const pageRows = useMemo(() => rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [rows, page]);
 
@@ -49,8 +48,6 @@ export default function Appointments() {
       <PageHeader
         title="Appointments"
         description="Bookings, reschedules and cancellations your agents handled during calls."
-        range={range}
-        onRangeChange={setRange}
       />
 
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">

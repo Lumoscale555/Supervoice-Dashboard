@@ -85,54 +85,48 @@ function sseRoute(handler) {
   };
 }
 
-const daysAgo = (n) => new Date(Date.now() - n * 86400000);
-const isoDate = (d) => d.toISOString().slice(0, 10);
-
-// Nothing before this date is ever fetched, shown or billed — history from
-// earlier days is ignored on every page. Override with DATA_START_DATE (YYYY-MM-DD).
+// The dashboard shows everything from DATA_START_DATE (in TIMEZONE) up to now,
+// and nothing before it: earlier days are never fetched, shown or billed. There
+// is no range picker, and no query parameter can reach further back.
 const DATA_START = process.env.DATA_START_DATE || '2026-09-26';
 
-function resolveRange(query) {
-  const days = { today: 1, '7d': 7, '30d': 30 }[query.range] || 1;
-  const to = query.to || isoDate(new Date());
-  let from = query.from || isoDate(daysAgo(days - 1));
-  if (from < DATA_START) from = DATA_START;
-  if (from > to) from = to;
-  return { days, from, to };
+function tzOffsetMs(now) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: TIMEZONE, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(now).map((p) => [p.type, p.value]),
+  );
+  const localAsUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second);
+  return { offset: localAsUtc - Math.floor(now.getTime() / 1000) * 1000, today: `${parts.year}-${parts.month}-${parts.day}` };
 }
 
-const windowISO = (from, to) => ({
-  from: new Date(from + 'T00:00:00Z').toISOString(),
-  to: new Date(to + 'T23:59:59Z').toISOString(),
-});
-const inWindow = (calls, w) =>
-  calls.filter((c) => {
-    const t = Date.parse(c.started_at);
-    return t >= Date.parse(w.from) && t <= Date.parse(w.to);
-  });
+function resolveRange() {
+  const { today } = tzOffsetMs(new Date());
+  return { days: Math.max(1, Math.round((Date.parse(today) - Date.parse(DATA_START)) / 86400000) + 1), from: DATA_START, to: today };
+}
 
-/** Overview payload: current period + previous period from ONE mirror read. */
+const todayISO = () => {
+  const now = new Date();
+  const { offset } = tzOffsetMs(now);
+  const [y, m, d] = DATA_START.split('-').map(Number);
+  return { from: new Date(Date.UTC(y, m - 1, d) - offset).toISOString(), to: now.toISOString() };
+};
+
+/** Overview payload: everything since DATA_START. */
 async function overviewPayload(req) {
-  const { days, from, to } = resolveRange(req.query);
-  const prevTo = new Date(new Date(from).getTime() - 86400000);
-  const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
-  const cur = windowISO(from, to);
-  const prev = windowISO(isoDate(prevFrom), isoDate(prevTo));
-
-  // No previous-period comparison if it would reach back before DATA_START.
-  const hasPrev = isoDate(prevFrom) >= DATA_START;
-  const [all, balance] = await Promise.all([
-    getCalls(req.tenant, req.client, { from: hasPrev ? prev.from : cur.from, to: cur.to }),
+  const { days, from, to } = resolveRange();
+  const [calls, balance] = await Promise.all([
+    getCalls(req.tenant, req.client, todayISO()),
     req.client.getBalance(),
   ]);
-  const calls = inWindow(all, cur);
 
   return {
     range: { from, to, days, timezone: TIMEZONE },
     summary: buildBillingSummary(calls, req.tenant),
-    previous: buildBillingSummary(hasPrev ? inWindow(all, prev) : [], req.tenant).totals,
+    previous: buildBillingSummary([], req.tenant).totals,
     balance,
-    recent_calls: all.slice(0, 8).map((c) => priceCall(c, req.tenant)),
+    recent_calls: calls.slice(0, 8).map((c) => priceCall(c, req.tenant)),
   };
 }
 
@@ -267,18 +261,10 @@ app.get(
 // --- Calls ----------------------------------------------------------------
 // Calls list, served from the in-memory mirror. Opaque cursor = page offset.
 async function filteredCalls(req) {
-  const { status, direction, phone_number, started_after, started_before, range } = req.query;
-  let from;
-  let to;
-  if (range || !started_after) {
-    ({ from, to } = windowISO(...Object.values(resolveRange(req.query)).slice(1)));
-  } else {
-    from = started_after;
-    to = started_before || new Date().toISOString();
-  }
+  const { status, direction, phone_number } = req.query;
   const digits = String(phone_number || '').replace(/\D/g, '');
 
-  let rows = await getCalls(req.tenant, req.client, { from, to });
+  let rows = await getCalls(req.tenant, req.client, todayISO());
   if (status) rows = rows.filter((c) => c.status === status);
   if (direction) rows = rows.filter((c) => c.direction === direction);
   if (digits) rows = rows.filter((c) => `${c.from || ''}${c.to || ''}`.replace(/\D/g, '').includes(digits));
@@ -381,9 +367,9 @@ app.get(
   requireClient,
   loadTenant,
   route(async (req) => {
-    const { from, to } = resolveRange(req.query);
+    const { from, to } = resolveRange();
     const toolMap = req.query.tools ? JSON.parse(req.query.tools) : DEFAULT_TOOL_MAP;
-    const calls = await getCalls(req.tenant, req.client, windowISO(from, to));
+    const calls = await getCalls(req.tenant, req.client, todayISO());
 
     const result = await collectAppointments(req.client, {
       toolMap,
@@ -402,12 +388,12 @@ app.get(
   requireClient,
   loadTenant,
   sseRoute(async (req, sse) => {
-    const { from, to } = resolveRange(req.query);
+    const { from, to } = resolveRange();
     const toolMap = req.query.tools ? JSON.parse(req.query.tools) : DEFAULT_TOOL_MAP;
     const scanLimit = Math.min(Number(req.query.scan_limit) || 80, 200);
     const BATCH = 25;
 
-    const calls = await getCalls(req.tenant, req.client, windowISO(from, to));
+    const calls = await getCalls(req.tenant, req.client, todayISO());
     const eligible = calls.filter(isScannable);
     const candidates = eligible.slice(0, scanLimit);
     const meta = { total_calls_in_window: calls.length, truncated: eligible.length > candidates.length, range: { from, to } };
@@ -440,10 +426,10 @@ app.get(
   requireClient,
   loadTenant,
   route(async (req) => {
-    const { days, from, to } = resolveRange(req.query);
+    const { days, from, to } = resolveRange();
 
     const [calls, balance] = await Promise.all([
-      getCalls(req.tenant, req.client, windowISO(from, to)),
+      getCalls(req.tenant, req.client, todayISO()),
       req.client.getBalance(),
     ]);
 
@@ -527,9 +513,9 @@ app.get(
     const tenant = await store.getTenantRaw(req.params.id);
     if (!tenant) throw Object.assign(new Error('Tenant not found.'), { status: 404 });
 
-    const { days, from, to } = resolveRange(req.query);
+    const { days, from, to } = resolveRange();
     const client = getScopedClient(tenant);
-    const calls = await getCalls(tenant, client, windowISO(from, to));
+    const calls = await getCalls(tenant, client, todayISO());
     const summary = buildBillingSummary(calls, tenant, { withMargin: true });
 
     // Every call, priced with margin — this is the only place client rate,

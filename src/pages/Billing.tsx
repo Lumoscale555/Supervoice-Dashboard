@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '../lib/api';
-import type { Billing as BillingData, RangeKey } from '../lib/types';
+import type { Billing as BillingData } from '../lib/types';
 import { PageHeader } from '../components/Shell';
 import { Card, DirectionPill, EmptyState, ErrorState, Skeleton, StatusBadge, Th, Td } from '../components/ui';
 import { SpendChart, type SpendPoint } from '../components/charts';
 import { inr, count, dayLabel, duration, dateTime, phone } from '../lib/format';
 
 export default function Billing() {
-  const [range, setRange] = useState<RangeKey>('today');
-  const { data, error, loading, initial, refresh } = useQuery<BillingData>('/api/billing', { range });
+  const { data, error, loading, initial, refresh } = useQuery<BillingData>('/api/billing');
 
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(0);
-  useEffect(() => { setPage(0); }, [range]);
   const items = data?.line_items ?? [];
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
   const pageItems = items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -39,7 +37,7 @@ export default function Billing() {
 
   return (
     <div>
-      <PageHeader title="Billing" description="Wallet balance and what you owe this period." range={range} onRangeChange={setRange} />
+      <PageHeader title="Billing" description="Wallet balance and what you owe this period." />
 
       <div className="mb-6 flex items-start gap-2.5 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 text-xs text-ink-muted animate-fade-in">
         <svg width="15" height="15" viewBox="0 0 16 16" className="mt-0.5 shrink-0 text-brand-500" aria-hidden="true">

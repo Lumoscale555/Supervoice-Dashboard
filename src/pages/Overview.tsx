@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useStreamQuery } from '../lib/api';
-import type { BillingSummary, BillingTotals, Balance, CallSummary, RangeKey } from '../lib/types';
+import type { BillingSummary, BillingTotals, Balance, CallSummary } from '../lib/types';
 import { PageHeader } from '../components/Shell';
 import { Card, ErrorState, Stat, StatusBadge, DirectionPill, TableSkeleton, Skeleton, EmptyState } from '../components/ui';
 import { CallVolumeChart, OutcomeBar, type VolumePoint } from '../components/charts';
@@ -54,13 +54,11 @@ function IconWallet() {
 }
 
 export default function Overview() {
-  const [range, setRange] = useState<RangeKey>('today');
 
   // SSE stream: the server sends chunks with balance + recent_calls immediately,
   // then partial summaries as call pages arrive, then the final with previous period.
   const { items, meta, error, streaming, initial, refresh } = useStreamQuery(
     '/api/overview/stream',
-    { range },
   );
 
   // Extract typed values from the merged meta object.
@@ -104,8 +102,6 @@ export default function Overview() {
       <PageHeader
         title="Overview"
         description="Everything your voice agents did, at a glance."
-        range={range}
-        onRangeChange={setRange}
       />
 
       {/* Streaming indicator */}
