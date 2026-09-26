@@ -44,7 +44,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <span className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-brand-500 text-white shadow-sm">
             <IconWave />
           </span>
-          <span className="text-[15px] font-semibold tracking-tight text-ink">Super Voice</span>
+          <span className="text-[15px] font-semibold tracking-tight text-ink">The Super Voice</span>
         </div>
 
         {me && (
@@ -197,7 +197,6 @@ export function PageHeader({
             <option value="today">Today</option>
             <option value="7d">Week</option>
             <option value="30d">Month</option>
-            <option value="90d">90 days</option>
           </select>
         )}
       </div>

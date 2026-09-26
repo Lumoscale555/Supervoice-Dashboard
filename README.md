@@ -1,4 +1,4 @@
-# Super Voice Dashboard
+# The Super Voice Dashboard
 
 A multi-tenant, white/blue operations dashboard for voice agent deployments —
 **Overview, Calls, Appointments, Billing, Settings** — built directly against

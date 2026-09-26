@@ -55,7 +55,7 @@ export default function AdminTenants() {
             />
           </svg>
         </span>
-        <h1 className="text-[15px] font-semibold tracking-tight text-ink">Super Voice — Admin</h1>
+        <h1 className="text-[15px] font-semibold tracking-tight text-ink">The Super Voice — Admin</h1>
         <div className="ml-auto flex items-center gap-2">
           <button className="btn-primary" onClick={() => setFormTenant('new')}>
             + Add client

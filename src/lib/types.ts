@@ -146,7 +146,7 @@ export interface Billing {
   line_items: Array<Pick<CallSummary, 'id' | 'started_at' | 'agent' | 'direction' | 'from' | 'to' | 'status' | 'duration_secs' | 'cost_inr'>>;
 }
 
-export type RangeKey = 'today' | '7d' | '30d' | '90d';
+export type RangeKey = 'today' | '7d' | '30d';
 
 /* ------------------------------------------------------------- Tenancy */
 

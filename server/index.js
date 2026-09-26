@@ -88,13 +88,17 @@ function sseRoute(handler) {
 const daysAgo = (n) => new Date(Date.now() - n * 86400000);
 const isoDate = (d) => d.toISOString().slice(0, 10);
 
+// Nothing before this date is ever fetched, shown or billed — history from
+// earlier days is ignored on every page. Override with DATA_START_DATE (YYYY-MM-DD).
+const DATA_START = process.env.DATA_START_DATE || '2026-09-26';
+
 function resolveRange(query) {
-  const days = { today: 1, '7d': 7, '30d': 30, '90d': 90 }[query.range] || 1;
-  return {
-    days,
-    from: query.from || isoDate(daysAgo(days - 1)),
-    to: query.to || isoDate(new Date()),
-  };
+  const days = { today: 1, '7d': 7, '30d': 30 }[query.range] || 1;
+  const to = query.to || isoDate(new Date());
+  let from = query.from || isoDate(daysAgo(days - 1));
+  if (from < DATA_START) from = DATA_START;
+  if (from > to) from = to;
+  return { days, from, to };
 }
 
 const windowISO = (from, to) => ({
@@ -115,8 +119,10 @@ async function overviewPayload(req) {
   const cur = windowISO(from, to);
   const prev = windowISO(isoDate(prevFrom), isoDate(prevTo));
 
+  // No previous-period comparison if it would reach back before DATA_START.
+  const hasPrev = isoDate(prevFrom) >= DATA_START;
   const [all, balance] = await Promise.all([
-    getCalls(req.tenant, req.client, { from: prev.from, to: cur.to }),
+    getCalls(req.tenant, req.client, { from: hasPrev ? prev.from : cur.from, to: cur.to }),
     req.client.getBalance(),
   ]);
   const calls = inWindow(all, cur);
@@ -124,7 +130,7 @@ async function overviewPayload(req) {
   return {
     range: { from, to, days, timezone: TIMEZONE },
     summary: buildBillingSummary(calls, req.tenant),
-    previous: buildBillingSummary(inWindow(all, prev), req.tenant).totals,
+    previous: buildBillingSummary(hasPrev ? inWindow(all, prev) : [], req.tenant).totals,
     balance,
     recent_calls: all.slice(0, 8).map((c) => priceCall(c, req.tenant)),
   };
@@ -565,7 +571,7 @@ if (!process.env.VERCEL) {
     return t ? getScopedClient(t) : null;
   });
   app.listen(PORT, async () => {
-    console.log(`\n  Super Voice API  ->  http://localhost:${PORT}`);
+    console.log(`\n  The Super Voice API  ->  http://localhost:${PORT}`);
     console.log(`  Tenant store: ${store.backend === 'supabase' ? 'Supabase' : 'local file (server/data/tenants.json)'}`);
     if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
       console.log(`  Admin login: ${process.env.ADMIN_USERNAME} / (from .env)`);

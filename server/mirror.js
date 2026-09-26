@@ -10,7 +10,7 @@
 // are fetched, in the background (stale-while-revalidate).
 //
 // `coveredFrom` is the earliest instant already synced, so switching from
-// "Month" to "90 days" only fetches the extra 60 days.
+// "Week" to "Month" only fetches the extra days.
 
 const FRESH_MS = 20_000; // younger than this: serve as-is
 const HARD_STALE_MS = 5 * 60_000; // older than this: wait for a refresh before serving

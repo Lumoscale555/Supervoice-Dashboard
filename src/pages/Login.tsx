@@ -35,7 +35,7 @@ export default function Login() {
               <path d="M2 8h1.4M5 4.8v6.4M8 2.6v10.8M11 5.6v4.8M14 7.2v1.6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
             </svg>
           </span>
-          <h1 className="text-lg font-semibold tracking-tight text-ink">Super Voice</h1>
+          <h1 className="text-lg font-semibold tracking-tight text-ink">The Super Voice</h1>
           <p className="text-sm text-ink-muted">Sign in to continue</p>
         </div>
 
