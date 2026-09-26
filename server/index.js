@@ -85,11 +85,11 @@ function sseRoute(handler) {
   };
 }
 
-// The dashboard shows only calls that started at or after DATA_START_AT, up to
-// now. Anything earlier is never requested from Sonex, so it can't be shown or
-// billed. There is no range picker and no query parameter can reach further back.
-// Override with DATA_START_AT (ISO time with offset, e.g. 2026-09-26T11:10:00+05:30).
-const DATA_START_AT = new Date(process.env.DATA_START_AT || '2026-09-26T11:10:00+05:30');
+// The dashboard shows only calls from 26 Sep 2026 (00:00 IST) onward, up to now.
+// Anything earlier is never requested from Sonex, so it can't be shown or billed.
+// Fixed in code — no .env setting, no range picker, and no query parameter can
+// reach further back.
+const DATA_START_AT = new Date('2026-09-26T00:00:00+05:30');
 
 const localDate = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(d);
 
