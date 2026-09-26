@@ -114,7 +114,7 @@ async function overviewPayload(req) {
     summary: buildBillingSummary(calls, req.tenant),
     previous: buildBillingSummary([], req.tenant).totals,
     balance,
-    recent_calls: calls.slice(0, 8).map((c) => priceCall(c, req.tenant)),
+    recent_calls: calls.slice(0, 5).map((c) => priceCall(c, req.tenant)),
   };
 }
 

@@ -195,7 +195,7 @@ export default function Overview() {
             <EmptyState title="No recent calls" body="Calls placed or received by your agents will appear here as they happen." />
           ) : (
             <ul className="divide-y divide-line">
-              {data.recent_calls.map((call, i) => (
+              {data.recent_calls.slice(0, 5).map((call, i) => (
                 <li key={call.id} className="animate-fade-up" style={{ animationDelay: `${i * 40}ms` }}>
                   <Link
                     to={`/calls?open=${call.id}`}
