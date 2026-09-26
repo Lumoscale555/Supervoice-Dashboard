@@ -85,33 +85,21 @@ function sseRoute(handler) {
   };
 }
 
-// The dashboard shows everything from DATA_START_DATE (in TIMEZONE) up to now,
-// and nothing before it: earlier days are never fetched, shown or billed. There
-// is no range picker, and no query parameter can reach further back.
-const DATA_START = process.env.DATA_START_DATE || '2026-09-26';
+// The dashboard shows only calls that started at or after DATA_START_AT, up to
+// now. Anything earlier is never requested from Sonex, so it can't be shown or
+// billed. There is no range picker and no query parameter can reach further back.
+// Override with DATA_START_AT (ISO time with offset, e.g. 2026-09-26T11:10:00+05:30).
+const DATA_START_AT = new Date(process.env.DATA_START_AT || '2026-09-26T11:10:00+05:30');
 
-function tzOffsetMs(now) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: TIMEZONE, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    }).formatToParts(now).map((p) => [p.type, p.value]),
-  );
-  const localAsUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second);
-  return { offset: localAsUtc - Math.floor(now.getTime() / 1000) * 1000, today: `${parts.year}-${parts.month}-${parts.day}` };
-}
+const localDate = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(d);
 
 function resolveRange() {
-  const { today } = tzOffsetMs(new Date());
-  return { days: Math.max(1, Math.round((Date.parse(today) - Date.parse(DATA_START)) / 86400000) + 1), from: DATA_START, to: today };
+  const from = localDate(DATA_START_AT);
+  const to = localDate(new Date());
+  return { days: Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1), from, to };
 }
 
-const todayISO = () => {
-  const now = new Date();
-  const { offset } = tzOffsetMs(now);
-  const [y, m, d] = DATA_START.split('-').map(Number);
-  return { from: new Date(Date.UTC(y, m - 1, d) - offset).toISOString(), to: now.toISOString() };
-};
+const todayISO = () => ({ from: DATA_START_AT.toISOString(), to: new Date().toISOString() });
 
 /** Overview payload: everything since DATA_START. */
 async function overviewPayload(req) {
