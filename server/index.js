@@ -89,7 +89,7 @@ function sseRoute(handler) {
 // Anything earlier is never requested from Sonex, so it can't be shown or billed.
 // Fixed in code — no .env setting, no range picker, and no query parameter can
 // reach further back.
-const DATA_START_AT = new Date('2026-09-26T00:00:00+05:30');
+const DATA_START_AT = new Date('2026-09-28T00:00:00+05:30');
 
 const localDate = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(d);
 
