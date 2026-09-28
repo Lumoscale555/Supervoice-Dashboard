@@ -85,27 +85,37 @@ function sseRoute(handler) {
   };
 }
 
-// The dashboard shows only calls from 26 Sep 2026 (00:00 IST) onward, up to now.
-// Anything earlier is never requested from Sonex, so it can't be shown or billed.
-// Fixed in code — no .env setting, no range picker, and no query parameter can
-// reach further back.
+// The dashboard shows only calls from 28 Sep 2026 (00:00 IST) onward, up to now,
+// unless a tenant has its own later start date below (e.g. a client that
+// onboarded after the global cutoff). Anything earlier is never requested from
+// Sonex, so it can't be shown or billed. Fixed in code — no .env setting, no
+// range picker, and no query parameter can reach further back.
 const DATA_START_AT = new Date('2026-09-28T00:00:00+05:30');
+
+// Per-tenant overrides, keyed by tenant id, for clients whose billing should
+// start later than the global cutoff above.
+const TENANT_DATA_START_AT = {
+  '4a8be27a-08e1-4880-982f-f8245eba1926': new Date('2026-09-22T00:00:00+05:30'), // MS Hospital
+  '23078463-d64a-46ce-9ad6-418ce0410682': new Date('2026-09-29T00:00:00+05:30'), // Footsecure
+};
+
+const dataStartAtFor = (tenant) => TENANT_DATA_START_AT[tenant?.id] || DATA_START_AT;
 
 const localDate = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(d);
 
-function resolveRange() {
-  const from = localDate(DATA_START_AT);
+function resolveRange(tenant) {
+  const from = localDate(dataStartAtFor(tenant));
   const to = localDate(new Date());
   return { days: Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1), from, to };
 }
 
-const todayISO = () => ({ from: DATA_START_AT.toISOString(), to: new Date().toISOString() });
+const todayISO = (tenant) => ({ from: dataStartAtFor(tenant).toISOString(), to: new Date().toISOString() });
 
 /** Overview payload: everything since DATA_START. */
 async function overviewPayload(req) {
-  const { days, from, to } = resolveRange();
+  const { days, from, to } = resolveRange(req.tenant);
   const [calls, balance] = await Promise.all([
-    getCalls(req.tenant, req.client, todayISO()),
+    getCalls(req.tenant, req.client, todayISO(req.tenant)),
     req.client.getBalance(),
   ]);
 
@@ -252,7 +262,7 @@ async function filteredCalls(req) {
   const { status, direction, phone_number } = req.query;
   const digits = String(phone_number || '').replace(/\D/g, '');
 
-  let rows = await getCalls(req.tenant, req.client, todayISO());
+  let rows = await getCalls(req.tenant, req.client, todayISO(req.tenant));
   if (status) rows = rows.filter((c) => c.status === status);
   if (direction) rows = rows.filter((c) => c.direction === direction);
   if (digits) rows = rows.filter((c) => `${c.from || ''}${c.to || ''}`.replace(/\D/g, '').includes(digits));
@@ -355,9 +365,9 @@ app.get(
   requireClient,
   loadTenant,
   route(async (req) => {
-    const { from, to } = resolveRange();
+    const { from, to } = resolveRange(req.tenant);
     const toolMap = req.query.tools ? JSON.parse(req.query.tools) : DEFAULT_TOOL_MAP;
-    const calls = await getCalls(req.tenant, req.client, todayISO());
+    const calls = await getCalls(req.tenant, req.client, todayISO(req.tenant));
 
     const result = await collectAppointments(req.client, {
       toolMap,
@@ -376,12 +386,12 @@ app.get(
   requireClient,
   loadTenant,
   sseRoute(async (req, sse) => {
-    const { from, to } = resolveRange();
+    const { from, to } = resolveRange(req.tenant);
     const toolMap = req.query.tools ? JSON.parse(req.query.tools) : DEFAULT_TOOL_MAP;
     const scanLimit = Math.min(Number(req.query.scan_limit) || 80, 200);
     const BATCH = 25;
 
-    const calls = await getCalls(req.tenant, req.client, todayISO());
+    const calls = await getCalls(req.tenant, req.client, todayISO(req.tenant));
     const eligible = calls.filter(isScannable);
     const candidates = eligible.slice(0, scanLimit);
     const meta = { total_calls_in_window: calls.length, truncated: eligible.length > candidates.length, range: { from, to } };
@@ -414,10 +424,10 @@ app.get(
   requireClient,
   loadTenant,
   route(async (req) => {
-    const { days, from, to } = resolveRange();
+    const { days, from, to } = resolveRange(req.tenant);
 
     const [calls, balance] = await Promise.all([
-      getCalls(req.tenant, req.client, todayISO()),
+      getCalls(req.tenant, req.client, todayISO(req.tenant)),
       req.client.getBalance(),
     ]);
 
@@ -501,9 +511,9 @@ app.get(
     const tenant = await store.getTenantRaw(req.params.id);
     if (!tenant) throw Object.assign(new Error('Tenant not found.'), { status: 404 });
 
-    const { days, from, to } = resolveRange();
+    const { days, from, to } = resolveRange(tenant);
     const client = getScopedClient(tenant);
-    const calls = await getCalls(tenant, client, todayISO());
+    const calls = await getCalls(tenant, client, todayISO(tenant));
     const summary = buildBillingSummary(calls, tenant, { withMargin: true });
 
     // Every call, priced with margin — this is the only place client rate,
