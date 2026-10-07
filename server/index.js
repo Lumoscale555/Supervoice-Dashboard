@@ -111,17 +111,32 @@ function resolveRange(tenant) {
 
 const todayISO = (tenant) => ({ from: dataStartAtFor(tenant).toISOString(), to: new Date().toISOString() });
 
+/**
+ * Prepaid credits: 1 credit = 1 minute of connected talk time. Used is the real
+ * talk time of this tenant's calls since their data start date; remaining is
+ * credits granted by the admin minus that.
+ */
+function walletFor(tenant, durationSecs) {
+  const total = Number(tenant.prepaidCreditsInr) || 0;
+  const used = +(durationSecs / 60).toFixed(2);
+  const remaining = +(total - used).toFixed(2);
+  return {
+    wallet: { balance: remaining, currency: 'credits' },
+    credits: [],
+    prepaid: { total, used, remaining },
+  };
+}
+
 /** Overview payload: everything since DATA_START. */
 async function overviewPayload(req) {
   const { days, from, to } = resolveRange(req.tenant);
-  const [calls, balance] = await Promise.all([
-    getCalls(req.tenant, req.client, todayISO(req.tenant)),
-    req.client.getBalance(),
-  ]);
+  const calls = await getCalls(req.tenant, req.client, todayISO(req.tenant));
+  const summary = buildBillingSummary(calls, req.tenant);
+  const balance = walletFor(req.tenant, summary.totals.billed_secs);
 
   return {
     range: { from, to, days, timezone: TIMEZONE },
-    summary: buildBillingSummary(calls, req.tenant),
+    summary,
     previous: buildBillingSummary([], req.tenant).totals,
     balance,
     recent_calls: calls.slice(0, 5).map((c) => priceCall(c, req.tenant)),
@@ -426,16 +441,14 @@ app.get(
   route(async (req) => {
     const { days, from, to } = resolveRange(req.tenant);
 
-    const [calls, balance] = await Promise.all([
-      getCalls(req.tenant, req.client, todayISO(req.tenant)),
-      req.client.getBalance(),
-    ]);
+    const calls = await getCalls(req.tenant, req.client, todayISO(req.tenant));
+    const summary = buildBillingSummary(calls, req.tenant);
 
     return {
       range: { from, to, days, timezone: TIMEZONE },
       pricing: { rate_per_minute_inr: req.tenant.clientRateInrPerMin },
-      balance,
-      summary: buildBillingSummary(calls, req.tenant),
+      balance: walletFor(req.tenant, summary.totals.billed_secs),
+      summary,
       // Per-call history (client rate only — never provider cost or margin).
       line_items: calls.map((c) => {
         const { id, started_at, agent, direction, from: caller, to: callee, status, duration_secs, cost_inr } = priceCall(c, req.tenant);

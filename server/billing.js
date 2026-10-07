@@ -25,6 +25,7 @@ export function buildBillingSummary(calls, tenant, { withMargin = false } = {}) 
     calls: priced.length,
     connected: priced.filter((c) => c.status === 'completed').length,
     duration_secs: priced.reduce((s, c) => s + c.duration_secs, 0),
+    billed_secs: priced.filter((c) => c.status === 'completed').reduce((s, c) => s + c.duration_secs, 0),
     cost_inr: +priced.reduce((s, c) => s + c.cost_inr, 0).toFixed(2),
     by_status: tally(priced, (c) => c.status),
     by_direction: tally(priced, (c) => c.direction),

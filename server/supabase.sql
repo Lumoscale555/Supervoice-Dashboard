@@ -25,6 +25,10 @@ create table if not exists tenants (
 -- touching anything else.
 alter table tenants add column if not exists updated_at timestamptz not null default now();
 
+-- Prepaid credits (₹) the admin has given this client. Their wallet shows
+-- this minus what their calls have cost since their data start date.
+alter table tenants add column if not exists prepaid_credits_inr numeric not null default 0;
+
 create unique index if not exists tenants_username_lower_idx on tenants (lower(username));
 
 -- Keep updated_at current automatically on every UPDATE — including edits

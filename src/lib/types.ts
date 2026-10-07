@@ -84,6 +84,7 @@ export interface BillingSummary {
 export interface Balance {
   wallet: { balance: number; currency: string };
   credits: Array<{ service: string; available: number; next_expiry: string | null }>;
+  prepaid?: { total: number; used: number; remaining: number };
 }
 
 export interface Voice {
@@ -160,6 +161,7 @@ export interface TenantPublic {
   agentName: string | null;
   clientRateInrPerMin: number;
   providerCostInrPerMin: number;
+  prepaidCreditsInr: number;
   createdAt: string;
   updatedAt: string;
   hasApiKey: boolean;

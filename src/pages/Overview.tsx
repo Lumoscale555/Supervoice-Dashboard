@@ -151,10 +151,10 @@ export default function Overview() {
             />
             <Stat
               index={3}
-              label="Wallet balance"
-              value={inr(data?.balance?.wallet.balance)}
+              label="Credits remaining"
+              value={typeof data?.balance?.prepaid?.remaining === 'number' ? data.balance.prepaid.remaining.toLocaleString('en-IN', { maximumFractionDigits: 1 }) : '—'}
               icon={<IconWallet />}
-              hint={data?.balance?.credits.length ? `${data.balance.credits.length} active credit grant${data.balance.credits.length > 1 ? 's' : ''}` : 'No active credits'}
+              hint={data?.balance?.prepaid ? `${data.balance.prepaid.used.toLocaleString('en-IN', { maximumFractionDigits: 1 })} of ${data.balance.prepaid.total.toLocaleString('en-IN')} min used` : '1 credit = 1 minute'}
             />
           </>
         )}

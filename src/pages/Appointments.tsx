@@ -82,7 +82,7 @@ export default function Appointments() {
             <table className="w-full">
               <thead>
                 <tr>
-                  <Th>Name</Th>
+                  <Th>Patient</Th>
                   <Th>Number</Th>
                   <Th>Age</Th>
                   <Th>Medical concern</Th>

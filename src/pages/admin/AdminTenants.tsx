@@ -183,6 +183,8 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
   const [agentName, setAgentName] = useState(tenant?.agentName ?? '');
   const [rate, setRate] = useState(String(tenant?.clientRateInrPerMin ?? 5));
   const [cost, setCost] = useState(String(tenant?.providerCostInrPerMin ?? 2.5));
+  // New client: initial credits. Existing client: minutes to ADD to the current total.
+  const [credits, setCredits] = useState(isNew ? '0' : '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -203,6 +205,8 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
         clientRateInrPerMin: rateNum,
         providerCostInrPerMin: costNum,
       };
+      if (isNew) payload.prepaidCreditsInr = Number(credits) || 0;
+      else if (Number(credits)) payload.addPrepaidCredits = Number(credits);
       if (password) payload.password = password;
       if (apiKey) payload.sonexApiKey = apiKey;
 
@@ -351,6 +355,22 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
               <Field label="Provider cost (₹/min)">
                 <input type="number" step="0.5" min="0" className="field w-full" value={cost} onChange={(e) => setCost(e.target.value)} required />
               </Field>
+            </div>
+            <div className="mt-3">
+              {!isNew && (
+                <div className="mb-2 flex items-center justify-between rounded-lg bg-brand-50/60 px-3 py-2 text-sm">
+                  <span className="text-ink-muted">Current total credits</span>
+                  <span className="font-semibold tnum">{tenant?.prepaidCreditsInr ?? 0} min</span>
+                </div>
+              )}
+              <Field label={isNew ? 'Prepaid credits (1 credit = 1 min)' : 'Add credits (1 credit = 1 min)'}>
+                <input type="number" step="1" min="0" className="field w-full" placeholder={isNew ? '0' : 'e.g. 50'} value={credits} onChange={(e) => setCredits(e.target.value)} />
+              </Field>
+              <p className="mt-1 text-[11px] text-ink-faint">
+                {isNew
+                  ? 'Starting minutes for this client.'
+                  : `Added to the current total: ${tenant?.prepaidCreditsInr ?? 0} + ${Number(credits) || 0} = ${(tenant?.prepaidCreditsInr ?? 0) + (Number(credits) || 0)} min.`}
+              </p>
             </div>
             <div className="mt-3 flex items-center justify-between rounded-lg bg-brand-50/60 px-3 py-2 text-sm">
               <span className="text-ink-muted">Margin per minute</span>

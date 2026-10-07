@@ -6,6 +6,8 @@ import { Card, DirectionPill, EmptyState, ErrorState, Skeleton, StatusBadge, Th,
 import { SpendChart, type SpendPoint } from '../components/charts';
 import { inr, count, dayLabel, duration, dateTime, phone } from '../lib/format';
 
+const mins = (n?: number) => (typeof n === 'number' ? n.toLocaleString('en-IN', { maximumFractionDigits: 1 }) : '—');
+
 export default function Billing() {
   const { data, error, loading, initial, refresh } = useQuery<BillingData>('/api/billing');
 
@@ -23,7 +25,7 @@ export default function Billing() {
   if (error && !data) {
     return (
       <div>
-        <PageHeader title="Billing" description="Wallet balance and what you owe this period." />
+        <PageHeader title="Billing" description="Prepaid credits and what you owe this period." />
         <Card>
           <ErrorState message={error} onRetry={refresh} />
         </Card>
@@ -31,13 +33,13 @@ export default function Billing() {
     );
   }
 
-  const wallet = data?.balance.wallet;
+  const prepaid = data?.balance.prepaid;
   const totals = data?.summary.totals;
   const rate = data?.pricing.rate_per_minute_inr ?? 5;
 
   return (
     <div>
-      <PageHeader title="Billing" description="Wallet balance and what you owe this period." />
+      <PageHeader title="Billing" description="Prepaid credits and what you owe this period." />
 
       <div className="mb-6 flex items-start gap-2.5 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 text-xs text-ink-muted animate-fade-in">
         <svg width="15" height="15" viewBox="0 0 16 16" className="mt-0.5 shrink-0 text-brand-500" aria-hidden="true">
@@ -50,13 +52,21 @@ export default function Billing() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card title="Wallet" subtitle="Prepaid balance" className="lg:col-span-1">
+        <Card title="Prepaid credits" subtitle="1 credit = 1 minute" className="lg:col-span-1">
           {initial ? (
             <Skeleton className="h-24" />
           ) : (
             <>
-              <div className="text-3xl font-semibold tracking-tight text-ink tnum">{inr(wallet?.balance)}</div>
-              <p className="mt-1 text-xs text-ink-muted">available</p>
+              <div className={`text-3xl font-semibold tracking-tight tnum ${(prepaid?.remaining ?? 0) < 0 ? 'text-rose-600' : 'text-ink'}`}>{mins(prepaid?.remaining)}</div>
+              <p className="mt-1 text-xs text-ink-muted">
+                {(prepaid?.remaining ?? 0) < 0 ? 'credits over the prepaid limit' : 'credits remaining'}
+                {data?.range.from ? ` · counted from ${dayLabel(data.range.from)}` : ''}
+              </p>
+              <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-sm">
+                <div className="flex justify-between"><dt className="text-ink-muted">Total prepaid</dt><dd className="font-medium tnum">{mins(prepaid?.total)}</dd></div>
+                <div className="flex justify-between"><dt className="text-ink-muted">Used</dt><dd className="font-medium tnum">{mins(prepaid?.used)}</dd></div>
+                <div className="flex justify-between"><dt className="text-ink-muted">Remaining</dt><dd className={`font-medium tnum ${(prepaid?.remaining ?? 0) < 0 ? 'text-rose-600' : ''}`}>{mins(prepaid?.remaining)}</dd></div>
+              </dl>
             </>
           )}
         </Card>

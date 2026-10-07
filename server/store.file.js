@@ -78,6 +78,7 @@ export async function createTenant(input) {
     agentName: input.agentName || null,
     clientRateInrPerMin: Number(input.clientRateInrPerMin) || 5,
     providerCostInrPerMin: Number(input.providerCostInrPerMin) || 2.5,
+    prepaidCreditsInr: Number(input.prepaidCreditsInr) || 0,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -100,6 +101,10 @@ export async function updateTenant(id, patch) {
   if (patch.agentName !== undefined) t.agentName = patch.agentName || null;
   if (patch.clientRateInrPerMin !== undefined) t.clientRateInrPerMin = Number(patch.clientRateInrPerMin);
   if (patch.providerCostInrPerMin !== undefined) t.providerCostInrPerMin = Number(patch.providerCostInrPerMin);
+  if (patch.prepaidCreditsInr !== undefined) t.prepaidCreditsInr = Math.max(0, Number(patch.prepaidCreditsInr) || 0);
+  if (patch.addPrepaidCredits) {
+    t.prepaidCreditsInr = Math.max(0, (t.prepaidCreditsInr || 0) + (Number(patch.addPrepaidCredits) || 0));
+  }
   t.updatedAt = new Date().toISOString();
   persist();
   return toPublic(t);

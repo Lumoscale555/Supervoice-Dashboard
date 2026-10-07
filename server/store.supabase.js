@@ -37,6 +37,7 @@ function fromRow(row) {
     agentName: row.agent_name,
     clientRateInrPerMin: Number(row.client_rate_inr_per_min),
     providerCostInrPerMin: Number(row.provider_cost_inr_per_min),
+    prepaidCreditsInr: Number(row.prepaid_credits_inr) || 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -97,6 +98,7 @@ export async function createTenant(input) {
       agent_name: input.agentName || null,
       client_rate_inr_per_min: Number(input.clientRateInrPerMin) || 5,
       provider_cost_inr_per_min: Number(input.providerCostInrPerMin) || 2.5,
+      prepaid_credits_inr: Number(input.prepaidCreditsInr) || 0,
     })
     .select('*')
     .single();
@@ -122,6 +124,14 @@ export async function updateTenant(id, patch) {
   if (patch.agentName !== undefined) update.agent_name = patch.agentName || null;
   if (patch.clientRateInrPerMin !== undefined) update.client_rate_inr_per_min = Number(patch.clientRateInrPerMin);
   if (patch.providerCostInrPerMin !== undefined) update.provider_cost_inr_per_min = Number(patch.providerCostInrPerMin);
+
+  if (patch.prepaidCreditsInr !== undefined) update.prepaid_credits_inr = Math.max(0, Number(patch.prepaidCreditsInr) || 0);
+  // Top-up: add to the existing total instead of replacing it.
+  if (patch.addPrepaidCredits) {
+    update.prepaid_credits_inr = Math.max(0, (existing.prepaidCreditsInr || 0) + (Number(patch.addPrepaidCredits) || 0));
+  }
+
+  if (!Object.keys(update).length) return toPublic(existing);
 
   const { data, error } = await supabase.from(TABLE).update(update).eq('id', id).select('*').single();
   if (error) fail(error, 'Could not update client.');
