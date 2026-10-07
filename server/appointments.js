@@ -14,7 +14,7 @@ export const DEFAULT_TOOL_MAP = {
 };
 
 const FIELD_ALIASES = {
-  startsAt: ['start', 'start_time', 'starts_at', 'datetime', 'date_time', 'appointment_time', 'slot', 'when'],
+  startsAt: ['start', 'start_time', 'starts_at', 'datetime', 'date_time', 'appointment_time', 'slot', 'when', 'dateTime'],
   date: ['date', 'appointment_date', 'day'],
   time: ['time', 'appointment_time', 'slot_time'],
   name: ['name', 'customer_name', 'patient_name', 'full_name', 'caller_name', 'contact_name'],
@@ -22,8 +22,54 @@ const FIELD_ALIASES = {
   email: ['email', 'email_address'],
   service: ['service', 'reason', 'type', 'appointment_type', 'purpose', 'treatment'],
   location: ['location', 'branch', 'office', 'clinic', 'store'],
+  age: ['age', 'patient_age'],
+  concern: ['concern', 'medical_concern', 'complaint', 'issue', 'problem', 'symptoms', 'condition'],
   reference: ['id', 'booking_id', 'appointment_id', 'reference', 'confirmation', 'confirmation_number'],
 };
+
+// Sonex delivers a tool's arguments/result as JSON *strings*, so they must be
+// parsed before any field can be read. Unparseable text is left as-is.
+function parseMaybeJson(value) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+// Calendar tools return the booking nested under data (Google: data, Cal.com:
+// data.data). Flatten so the aliases below can see start/attendees/etc.
+function unwrap(result) {
+  let cur = result;
+  for (let i = 0; i < 3 && cur && typeof cur === 'object' && cur.data && typeof cur.data === 'object' && !Array.isArray(cur.data); i += 1) {
+    cur = { ...cur.data, ...Object.fromEntries(Object.entries(cur).filter(([k]) => k !== 'data')) };
+  }
+  return cur;
+}
+
+const PLACEHOLDER = /^(not provided|\[?patient name\]?|unknown|n\/a|none)$/i;
+const clean = (v) => (typeof v === 'string' && PLACEHOLDER.test(v.trim()) ? undefined : v);
+
+// The agent packs patient details into a free-text calendar description:
+// "Patient: Akula Gowri, Age: 45, Requested Doctor: Dr. Suresh Babu".
+function parseDescription(text) {
+  const out = {};
+  if (typeof text !== 'string') return out;
+  for (const part of text.split(/[,;.\n]\s*(?=[A-Za-z][A-Za-z ]*:)/)) {
+    const m = part.match(/^\s*([A-Za-z][A-Za-z ]*?)\s*:\s*(.+?)\s*$/);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    if (/^(patient|name|patient name)$/.test(key)) out.name = m[2];
+    else if (/^age$/.test(key)) out.age = m[2];
+    else if (/doctor|dr$/.test(key)) out.doctor = m[2];
+    else if (/concern|complaint|issue|problem|reason|symptom|condition|treatment/.test(key)) out.concern = m[2];
+    else if (/phone|mobile|contact/.test(key)) out.phone = m[2];
+  }
+  // Free text with no "Key:" structure ("Patient visiting for gynecology concern.") is the concern itself.
+  if (!Object.keys(out).length && text.trim()) out.concern = text.trim().replace(/\.$/, '');
+  return out;
+}
 
 function pick(source, aliases) {
   if (!source || typeof source !== 'object') return undefined;
@@ -73,18 +119,39 @@ function field(tool, aliases) {
   return pick(tool.result, aliases) ?? pick(tool.arguments, aliases) ?? undefined;
 }
 
+// Everything the agent knew about the patient, from whichever place it put it.
+function patientDetails(tool) {
+  const fromText = parseDescription(pick(tool.arguments, ['description', 'notes']) ?? pick(tool.result, ['description']));
+  const attendee = Array.isArray(tool.result?.attendees) ? tool.result.attendees[0] : null;
+  const summaryName = String(pick(tool.arguments, ['summary', 'title']) ?? '').split(/\s[—–-]\s/)[1];
+  return {
+    name: clean(field(tool, FIELD_ALIASES.name)) ?? clean(fromText.name) ?? clean(attendee?.name) ?? clean(summaryName),
+    age: field(tool, FIELD_ALIASES.age) ?? fromText.age,
+    concern: field(tool, FIELD_ALIASES.concern) ?? fromText.concern,
+    doctor: fromText.doctor,
+    phone: field(tool, FIELD_ALIASES.phone) ?? fromText.phone,
+  };
+}
+
 /** Turn one call detail into zero or more appointment records. */
 export function appointmentsFromCall(call, toolMap = DEFAULT_TOOL_MAP) {
   const tools = Array.isArray(call?.tool_calls) ? call.tool_calls : [];
   const out = [];
 
-  tools.forEach((tool, index) => {
+  tools.forEach((rawTool, index) => {
+    const tool = {
+      ...rawTool,
+      arguments: parseMaybeJson(rawTool.arguments),
+      result: unwrap(parseMaybeJson(rawTool.result)),
+      error: parseMaybeJson(rawTool.error),
+    };
     const kind = classify(tool.name, toolMap);
     if (!kind || kind === 'check') return;
 
     const startsAt = resolveStartsAt(tool);
+    const patient = patientDetails(tool);
     const status =
-      tool.status === 'error' ? 'failed' : kind === 'cancel' ? 'cancelled' : kind === 'reschedule' ? 'rescheduled' : 'booked';
+      (tool.status === 'error' || tool.status === 'failure' || tool.error) ? 'failed' : kind === 'cancel' ? 'cancelled' : kind === 'reschedule' ? 'rescheduled' : 'booked';
 
     out.push({
       id: `${call.id}:${index}`,
@@ -94,15 +161,18 @@ export function appointmentsFromCall(call, toolMap = DEFAULT_TOOL_MAP) {
       tool_name: tool.name,
       booked_at: tool.at || call.started_at || null,
       starts_at: startsAt,
-      customer_name: field(tool, FIELD_ALIASES.name) ?? null,
-      phone: field(tool, FIELD_ALIASES.phone) ?? call.from ?? call.to ?? null,
+      customer_name: patient.name ?? null,
+      age: patient.age != null ? String(patient.age) : null,
+      concern: patient.concern ?? null,
+      doctor: patient.doctor ?? null,
+      phone: patient.phone ?? call.from ?? call.to ?? null,
       email: field(tool, FIELD_ALIASES.email) ?? null,
-      service: field(tool, FIELD_ALIASES.service) ?? null,
+      service: field(tool, FIELD_ALIASES.service) ?? patient.doctor ?? null,
       location: field(tool, FIELD_ALIASES.location) ?? null,
       reference: field(tool, FIELD_ALIASES.reference) ?? null,
       agent: call.agent ?? null,
       direction: call.direction ?? null,
-      error: tool.error ?? null,
+      error: tool.error == null ? null : typeof tool.error === 'string' ? tool.error : tool.error.message ?? JSON.stringify(tool.error),
       raw: { arguments: tool.arguments ?? null, result: tool.result ?? null },
     });
   });

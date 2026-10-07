@@ -267,7 +267,7 @@ export function Th({ children, className, align = 'left' }: { children?: ReactNo
       scope="col"
       className={cx(
         'sticky top-0 z-10 whitespace-nowrap border-b border-line bg-white/95 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-ink-muted backdrop-blur',
-        align === 'right' && 'text-right',
+        align === 'right' ? 'text-right' : 'text-left',
         className,
       )}
     >

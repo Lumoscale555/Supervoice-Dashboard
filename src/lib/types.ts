@@ -109,6 +109,9 @@ export interface Appointment {
   booked_at: string | null;
   starts_at: string | null;
   customer_name: string | null;
+  age: string | null;
+  concern: string | null;
+  doctor: string | null;
   phone: string | null;
   email: string | null;
   service: string | null;
