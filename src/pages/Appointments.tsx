@@ -3,6 +3,7 @@ import { useStreamQuery } from '../lib/api';
 import type { Appointment } from '../lib/types';
 import { PageHeader } from '../components/Shell';
 import { Card, EmptyState, ErrorState, Skeleton, TableSkeleton, Th, Td, cx } from '../components/ui';
+import { CallDrawer } from './Calls';
 import { dateTime, phone, titleCase } from '../lib/format';
 
 // Label reflects the outcome (status), not just the action attempted (kind) —
@@ -17,6 +18,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function Appointments() {
   const [kindFilter, setKindFilter] = useState<string>('');
+  const [openCallId, setOpenCallId] = useState<string | null>(null);
 
   const { items, meta, error, streaming, initial, refresh } = useStreamQuery<Appointment>(
     '/api/appointments/stream',
@@ -70,7 +72,7 @@ export default function Appointments() {
           </div>
         ) : initial ? (
           <div className="p-4">
-            <TableSkeleton rows={6} cols={6} />
+            <TableSkeleton rows={6} cols={5} />
           </div>
         ) : !rows.length && !streaming ? (
           <EmptyState
@@ -84,7 +86,6 @@ export default function Appointments() {
                 <tr>
                   <Th>Patient</Th>
                   <Th>Number</Th>
-                  <Th>Age</Th>
                   <Th>Medical concern</Th>
                   <Th>Appointment time</Th>
                   <Th>Status</Th>
@@ -94,12 +95,13 @@ export default function Appointments() {
                 {pageRows.map((appt, i) => (
                   <tr
                     key={appt.id}
-                    className="animate-fade-up border-b border-line transition-colors duration-150 last:border-0 hover:bg-brand-50/40"
+                    className="animate-fade-up cursor-pointer border-b border-line transition-colors duration-150 last:border-0 hover:bg-brand-50/40"
+                    onClick={() => setOpenCallId(appt.call_id)}
+                    title="View call transcript"
                     style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
                   >
                     <Td className="font-medium">{appt.customer_name ?? '—'}</Td>
                     <Td className="text-ink-muted">{phone(appt.phone)}</Td>
-                    <Td className="text-ink-muted">{appt.age ?? '—'}</Td>
                     <Td className="text-ink-muted">{appt.concern ?? appt.service ?? '—'}</Td>
                     <Td className="text-ink-muted">{appt.starts_at ? dateTime(appt.starts_at) : '—'}</Td>
                     <Td>
@@ -117,7 +119,7 @@ export default function Appointments() {
                 {/* Shimmer rows while scanning more calls */}
                 {streaming && (
                   <tr className="border-b border-line last:border-0">
-                    {Array.from({ length: 6 }).map((_, i) => (
+                    {Array.from({ length: 5 }).map((_, i) => (
                       <td key={i} className="px-4 py-3">
                         <div className="h-4 w-full animate-pulse rounded bg-slate-100" />
                       </td>
@@ -170,6 +172,7 @@ export default function Appointments() {
           Scanned {scannedCalls} calls · {items.length} appointment{items.length !== 1 ? 's' : ''} found
         </p>
       )}
+      {openCallId && <CallDrawer id={openCallId} onClose={() => setOpenCallId(null)} />}
     </div>
   );
 }

@@ -198,7 +198,7 @@ export default function Calls() {
 
 /* ------------------------------------------------------------ Drawer */
 
-function CallDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+export function CallDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { data: call, error, loading } = useQuery<CallDetail>(`/api/calls/${id}`);
 
   useEffect(() => {
