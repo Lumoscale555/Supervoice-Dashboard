@@ -101,11 +101,27 @@ export function createSonexClient({ apiKey, cacheTtlMs = 90_000 }) {
   }
 
   async function doRequest(key, path, query, retries, noCache) {
-    const res = await limit(() =>
-      fetch(key, {
-        headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-      }),
-    );
+    let res;
+    try {
+      res = await limit(() =>
+        fetch(key, {
+          headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+        }),
+      );
+    } catch (err) {
+      // Network blip: retry once or twice before surfacing.
+      if (retries > 0) {
+        await new Promise((r) => setTimeout(r, 500));
+        return doRequest(key, path, query, retries - 1, noCache);
+      }
+      throw err;
+    }
+
+    // Transient gateway errors from Sonex are worth a quick retry (all calls are GETs).
+    if ([502, 503, 504].includes(res.status) && retries > 0) {
+      await new Promise((r) => setTimeout(r, 600));
+      return doRequest(key, path, query, retries - 1, noCache);
+    }
 
     if (res.status === 429 && retries > 0) {
       const retryAfter = Number(res.headers.get('Retry-After')) || 2;
