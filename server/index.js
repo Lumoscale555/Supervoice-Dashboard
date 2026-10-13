@@ -97,6 +97,7 @@ const DATA_START_AT = new Date('2026-09-28T00:00:00+05:30');
 const TENANT_DATA_START_AT = {
   '4a8be27a-08e1-4880-982f-f8245eba1926': new Date('2026-09-22T00:00:00+05:30'), // MS Hospital
   '23078463-d64a-46ce-9ad6-418ce0410682': new Date('2026-09-29T00:00:00+05:30'), // Footsecure
+  '2d570161-ae73-4fc1-885d-22dfb0a516b9': new Date('2026-10-13T00:00:00+05:30'), // Cleo Skin Clinic
 };
 
 const dataStartAtFor = (tenant) => TENANT_DATA_START_AT[tenant?.id] || DATA_START_AT;
