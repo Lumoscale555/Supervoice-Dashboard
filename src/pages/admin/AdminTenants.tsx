@@ -185,6 +185,7 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
   const [cost, setCost] = useState(String(tenant?.providerCostInrPerMin ?? 2.5));
   // New client: initial credits. Existing client: minutes to ADD to the current total.
   const [credits, setCredits] = useState(isNew ? '0' : '');
+  const [dataStart, setDataStart] = useState(tenant?.dataStartDate?.slice(0, 10) ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -204,6 +205,7 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
         agentName: agentName || null,
         clientRateInrPerMin: rateNum,
         providerCostInrPerMin: costNum,
+        dataStartDate: dataStart || null,
       };
       if (isNew) payload.prepaidCreditsInr = Number(credits) || 0;
       else if (Number(credits)) payload.addPrepaidCredits = Number(credits);
@@ -372,6 +374,14 @@ function TenantFormDrawer({ tenant, onClose, onSaved }: { tenant: TenantPublic |
                   : `Added to the current total: ${tenant?.prepaidCreditsInr ?? 0} + ${Number(credits) || 0} = ${(tenant?.prepaidCreditsInr ?? 0) + (Number(credits) || 0)} min.`}
               </p>
             </div>
+            <div className="mt-3">
+              <Field label="Data starts from">
+                <input type="date" className="field w-full" value={dataStart} onChange={(e) => setDataStart(e.target.value)} />
+              </Field>
+              <p className="mt-1 text-[11px] text-ink-faint">
+                Calls before this date (IST) are never shown or deducted from credits. Leave blank for the default start.
+              </p>
+            </div>
             <div className="mt-3 flex items-center justify-between rounded-lg bg-brand-50/60 px-3 py-2 text-sm">
               <span className="text-ink-muted">Margin per minute</span>
               <span className={cx('font-semibold tnum', marginNum >= 0 ? 'text-emerald-700' : 'text-rose-600')}>{inr(marginNum)}</span>
@@ -409,10 +419,14 @@ function TenantBillingDrawer({ tenant, onClose }: { tenant: TenantPublic; onClos
   const [data, setData] = useState<AdminBilling | null>(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = () =>
     api<AdminBilling>(`/api/admin/tenants/${tenant.id}/billing`, { range: '30d' })
       .then(setData)
       .catch((err) => setError((err as Error).message));
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenant.id]);
 
   const totals = data?.summary.totals;
@@ -496,7 +510,7 @@ function TenantBillingDrawer({ tenant, onClose }: { tenant: TenantPublic; onClos
                         {data.line_items.map((call, i) => (
                           <tr
                             key={call.id}
-                            className="animate-fade-up border-b border-line last:border-0 hover:bg-brand-50/30"
+                            className={"animate-fade-up border-b border-line last:border-0 hover:bg-brand-50/30"}
                             style={{ animationDelay: `${Math.min(i, 10) * 20}ms` }}
                           >
                             <Td className="font-medium">{phone(call.direction === 'inbound' ? call.from : call.to)}</Td>

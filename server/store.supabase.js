@@ -30,14 +30,11 @@ function fromRow(row) {
     username: row.username,
     passwordHash: row.password_hash,
     sonexApiKey: row.sonex_api_key || '',
-    // agent_id exists in the DB but is deliberately unused: Sonex's own
-    // dashboard only shows agents by name, never an ID, so tenant isolation
-    // is by agentName (see server/tenantClient.js). The column is left in
-    // place rather than dropped to avoid a destructive migration.
     agentName: row.agent_name,
     clientRateInrPerMin: Number(row.client_rate_inr_per_min),
     providerCostInrPerMin: Number(row.provider_cost_inr_per_min),
     prepaidCreditsInr: Number(row.prepaid_credits_inr) || 0,
+    dataStartDate: row.data_start_date || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -99,6 +96,7 @@ export async function createTenant(input) {
       client_rate_inr_per_min: Number(input.clientRateInrPerMin) || 5,
       provider_cost_inr_per_min: Number(input.providerCostInrPerMin) || 2.5,
       prepaid_credits_inr: Number(input.prepaidCreditsInr) || 0,
+      data_start_date: input.dataStartDate || null,
     })
     .select('*')
     .single();
@@ -125,6 +123,7 @@ export async function updateTenant(id, patch) {
   if (patch.clientRateInrPerMin !== undefined) update.client_rate_inr_per_min = Number(patch.clientRateInrPerMin);
   if (patch.providerCostInrPerMin !== undefined) update.provider_cost_inr_per_min = Number(patch.providerCostInrPerMin);
 
+  if (patch.dataStartDate !== undefined) update.data_start_date = patch.dataStartDate || null;
   if (patch.prepaidCreditsInr !== undefined) update.prepaid_credits_inr = Math.max(0, Number(patch.prepaidCreditsInr) || 0);
   // Top-up: add to the existing total instead of replacing it.
   if (patch.addPrepaidCredits) {

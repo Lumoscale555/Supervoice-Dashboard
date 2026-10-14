@@ -162,6 +162,7 @@ export interface TenantPublic {
   clientRateInrPerMin: number;
   providerCostInrPerMin: number;
   prepaidCreditsInr: number;
+  dataStartDate?: string | null;
   createdAt: string;
   updatedAt: string;
   hasApiKey: boolean;

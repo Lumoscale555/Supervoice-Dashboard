@@ -100,7 +100,12 @@ const TENANT_DATA_START_AT = {
   '2d570161-ae73-4fc1-885d-22dfb0a516b9': new Date('2026-10-13T00:00:00+05:30'), // Cleo Skin Clinic
 };
 
-const dataStartAtFor = (tenant) => TENANT_DATA_START_AT[tenant?.id] || DATA_START_AT;
+// The admin-set date (Edit client -> Data starts from) wins; the map above and
+// the global cutoff are fallbacks for clients without one.
+const dataStartAtFor = (tenant) =>
+  (tenant?.dataStartDate && new Date(`${String(tenant.dataStartDate).slice(0, 10)}T00:00:00+05:30`)) ||
+  TENANT_DATA_START_AT[tenant?.id] ||
+  DATA_START_AT;
 
 const localDate = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(d);
 

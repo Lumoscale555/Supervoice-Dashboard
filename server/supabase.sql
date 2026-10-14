@@ -13,7 +13,6 @@ create table if not exists tenants (
   username                    text not null unique,
   password_hash               text not null,   -- salt:scrypt-hash, never plaintext
   sonex_api_key               text not null default '',
-  agent_id                    text,             -- unused (Sonex's dashboard shows no agent ID, only a name); kept for compatibility, never read/written by the app
   agent_name                  text,             -- display label only, not used for filtering
   client_rate_inr_per_min     numeric not null default 5,
   provider_cost_inr_per_min   numeric not null default 2.5,
@@ -28,6 +27,12 @@ alter table tenants add column if not exists updated_at timestamptz not null def
 -- Prepaid credits (₹) the admin has given this client. Their wallet shows
 -- this minus what their calls have cost since their data start date.
 alter table tenants add column if not exists prepaid_credits_inr numeric not null default 0;
+
+-- First day (YYYY-MM-DD, IST) this client's data/billing starts from.
+alter table tenants add column if not exists data_start_date date;
+
+-- Tenant isolation is by agent_name; the old agent_id column is not used.
+alter table tenants drop column if exists agent_id;
 
 create unique index if not exists tenants_username_lower_idx on tenants (lower(username));
 

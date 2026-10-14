@@ -17,15 +17,12 @@ There are two logins:
   username/password an admin gave them, and only ever sees their own calls,
   appointments and billing.
 
-**How isolation works:** Sonex has no client/tenant concept of its own — the
-only thing it exposes per call is `agent: { id, name }`, and `GET /v1/calls`
-filters on `agent_id` (not `agent.name`, which is just a display label Sonex
-doesn't guarantee unique). So every tenant record stores an `agentId`, and
-`server/tenantClient.js` forces that `agent_id` onto every list/scan request
-for that tenant and rejects any single-call lookup whose `agent.id` doesn't
-match — one client can never see another client's calls, even if they share
-one Sonex API key. Leave `agentId` blank only when a client has their own
-dedicated Sonex account/API key, so the whole account is already theirs.
+**How isolation works:** Sonex has no client/tenant concept of its own, and its
+dashboard shows agents by name only. Every tenant record stores an `agentName`,
+and `server/tenantClient.js` matches it (case-insensitively) against each call's
+`agent.name` so one client can never see another client's calls, even if they
+share one Sonex API key. Leave the agent name blank only when a client has their
+own dedicated Sonex account/API key.
 
 ## Billing model
 
